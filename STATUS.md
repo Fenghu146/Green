@@ -14,3 +14,4 @@
 - **`D:\cargo-target\<线>` 谁建谁删，一条线收工就删自己的 target 目录。** worktree 分支合入 main 后立刻删，不做归档；删不掉先查占用，不用 `--force`。
 - **`D:\cargo-target` 下的 `debug` / `release` / `release-fast` 是无主池。** 机器级 `CARGO_TARGET_DIR` 保留，它拦住"仓库里长出 `target\`"那类事故；代价是没设 per-line target dir 的构建全落进这三个扁平目录，所以只要没有构建在跑就整个删掉。判定"在跑"以 `<profile>\.cargo-lock` 能否独占打开为准（cargo 把它建在 profile 目录里，不在 target 根），再叠加无 `cargo`/`rustc` 进程、15 分钟无写入。每条线仍然必须显式设 `CARGO_TARGET_DIR=D:\cargo-target\<line>`，不设就是占着无主池。
 - 回收磁盘用 `scripts/disk-prune`（dry run 先看判决），删除前脚本会重探一次锁。
+- **已知债：磁盘阈值散在三处**（`.github/workflows/ci.yml` 的 runner 数字、`scripts/disk.sh` 的 30/50、`scripts/disk-prune` 的判定逻辑），迟早会分叉。应收口到一处：阈值只写在 `disk.sh`，CI 只调用它，`disk-prune` 只读它的默认值。

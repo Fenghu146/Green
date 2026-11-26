@@ -6,6 +6,9 @@
 #   scripts/disk-prune -Apply          delete what the dry run called deletable
 #                                      (--apply is accepted too)
 #
+# DISK_PRUNE_ONLY=main/debug,plugins/debug restricts a run to exact paths
+# relative to the target root: apply only what a reviewed dry run listed.
+#
 # Deletable means: a profile directory under the target root (debug, release,
 # release-fast, debug-*, release-*) whose last write is at least 15 minutes old,
 # whose .cargo-lock can be opened exclusively, that no cargo or rustc is using,
@@ -48,6 +51,21 @@ done
   exit 2
 }
 root=$(cd "$root" && pwd)
+
+declare -A allowed=()
+only=${DISK_PRUNE_ONLY:-}
+if [ -n "$only" ]; then
+  IFS=, read -ra wanted <<<"$only"
+  for rel in "${wanted[@]}"; do
+    case $rel in
+      '' | . | .. | ../* | */../* | */.. | /*)
+        echo "disk-prune: unsafe DISK_PRUNE_ONLY entry: $rel" >&2
+        exit 2
+        ;;
+    esac
+    allowed["$rel"]=1
+  done
+fi
 
 free_kb() { df -Pk "$1" | awk 'NR == 2 { print $4 }'; }
 size_mb() { du -sm "$1" 2>/dev/null | cut -f1; }
@@ -118,6 +136,7 @@ deletable=0
 delete=()
 
 echo "disk-prune: $root, floor age ${min_age}m, mode $([ "$apply" = 1 ] && echo apply || echo 'dry run')"
+[ -z "$only" ] || echo "disk-prune: allow-list: $only"
 echo 'disk-prune: protected: D:\Amp\Green, vendor/, patches/, assets/, sccache; no worktree remove --force, no bare cargo clean'
 printf '%-44s %9s %6s  %s\n' "directory" "size" "age" "verdict"
 
@@ -130,6 +149,11 @@ for dir in "${candidates[@]}"; do
       continue
       ;;
   esac
+  rel=${dir#"$root"/}
+  if [ -n "$only" ] && [ -z "${allowed[$rel]+x}" ]; then
+    printf '%-44s %9s %6s  %s\n' "$rel" "-" "-" "SKIP not in DISK_PRUNE_ONLY"
+    continue
+  fi
   case $dir in
     /d/Amp/*) printf '%-44s %9s %6s  %s\n' "$dir" "-" "-" "SKIP a checkout, not build output"; continue ;;
     */vendor/* | */patches/* | */assets/* | *sccache*)
