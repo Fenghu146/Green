@@ -1,8 +1,9 @@
 name: ci
 
 on:
+  # Every branch: a feature branch's first push is where a new workflow earns
+  # its trust, and main is not the only place a break lands.
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
