@@ -26,7 +26,6 @@ packaging/aur.sh 标签 [--push]  由该发布的 Arch 包 `ely-office-版本-1-
 packaging/source.sh dist        本提交的源码包、随包的 copyleft 上游源码（打过补丁的 MuPDF、Git）与 LibreOffice 构建所取的外部库（`packaging/lo-tarballs.tsv`，散列不符即失败）与随内核字体的上游原件（`packaging/libreoffice/fonts/SOURCES.tsv`，先用 engines/fonts/.upstream 的，散列不符即失败），文件名带提交号；有未提交改动即拒绝；发布只上传 Linux 的
 scripts/mac-ready.sh 凭据名     Mac 发布前：`coreaudiod` 20 秒内答 `system_profiler SPAudioDataType`（停应时放媒体的测试会挂住），`notarytool` 读得到该公证凭据（登录钥匙串在本会话里锁着即读不到）；任一不行即说明原因与出路并失败（ci.sh 在 macOS 上构建前调）
 scripts/release-tests.sh         发布的门：建好两个 worker 并点名，严格模式跑 `cargo test --workspace`，再跑 vendor 下各 crate 自己的测试（`tests/scripts/vendor-tests.sh`，本平台的 gpui-pre 一行缺失或零测试即败；Linux 经 `dbus-run-session`）（ci.sh 打包前调）
-scripts/compatibility.py [--check]  写 docs/compatibility.md 的版本与内核两行；--check 不符即败（ci.sh、pr.yml）
 scripts/test-map.py            写 docs/test-map.md：PRD 每个编号的任务与其测试（pr.yml 核对与提交一致）
 scripts/lo-tarballs.sh lo-src     列出该 LibreOffice 构建所取的压缩包（名字、SHA-256、地址），由其 `Makefile.fetch` 得出
 packaging/macos/bundle.sh ely-doc debug    出 dist/ElyDoc.app（带图标、文档类型与该应用的 worker；worker 在辅助包 `Contents/Helpers/Ely Engine.app`，有自己的包标识；内核不在包内）
@@ -43,6 +42,12 @@ scripts/extract-official-lo.sh 用 7zz 把官方镜像的 Frameworks 与 Resourc
 scripts/check.sh [根]            规则检查：入库代码文件不超 500 行（vendor、reference、patches 除外）、agents.md 不超 30000 字节、注释（comments.py）、测试的等待（waits.py）、横幅只有 `doc-fonts`（banners.py）、行尾（eol.sh）；JS、TS、TSX 与 HTML 的注释经 `tests/scripts/comments.mjs` 由官网的 TypeScript、parse5 解析，先在 `site/` 跑 `pnpm install`
 cd site && pnpm run deploy    官网构建并经 wrangler 发到 Cloudflare Workers：另有 `site/worker` 答 `/release.json`（最新版本、安装包地址与下载总数，缓存 5 分钟）并转发 `/releases/` 下的发布文件；地址 https://office.elygpui.com（workers.dev 上同站）
 scripts/deny.sh [根] [检查...]  cargo-deny：安全公告、yanked、许可与来源；重复版本只许 deny.toml 里列着的组，组消失而 skip 还在即败
+scripts/disk.sh [下限] [目录]  磁盘余量闸门：低于下限（默认 4G，可写 800M）即失败，并列出该目录下一层最大的十个子目录；余量每跑都打印，CI 的 disk job 用它（runner 的 workspace 也在 D:）
+scripts/notices.sh [根]          cargo-about 按 about.toml 与 about.hbs 重写 THIRD-PARTY-NOTICES.txt（去掉 CRLF，各平台字节一致）；ci.yml 重跑后 `git diff --exit-code` 核对
+scripts/vendor-gpui.sh [check|write]  vendor 的四个 gpui crate = crates.io 该版本 + patches/gpui 按序应用；check 重放后与 vendor/ 逐文件比对，版本从 Cargo.toml 读，hash 不符即说版本变了；补丁缺失、baseline 行与 pin 不一致也即败
+scripts/vendor-components.sh [check|write]  vendor/ely-gpui-components = Cargo.toml 的 pin，按 patches/ely-gpui-components/fc71e96-prune.txt 裁掉它自己仓库的路径，再按序应用该目录的补丁；check 同上逐文件比对
+scripts/vendor-crates.sh [check|write]  vendor 里另五个 crates.io 的 crate（accesskit 两个、mail-parser、pulldown-cmark、zbus）= 各版本的 tarball（hash 记在脚本里）+ patches/crates-io 的补丁，外加 vendor/Cargo.toml 那份工作区清单；check 同上逐文件比对
+scripts/compatibility.py [--check]  写 docs/compatibility.md 的版本与依赖两行（Green 版本、gpui 版本与补丁数、组件库 pin 与补丁数、裁掉的路径数）；--check 不符即败（ci.yml）
 scripts/panics.py [根]          非测试代码的 expect、unwrap、panic!、unreachable!（clippy 量，构建脚本、ely-mail-fake 除外）与 scripts/panics.tsv 逐条相符、各带理由，任一种类不多于 HEAD 的表；clippy 由它自设 `CARGO_CHECK_SHARED_DEPS=0`，编不过时打出编译错；`--sites` 列出本机各处
 cargo check --workspace
 cargo test --workspace     `-p` 的 ely-files、ely-mail、ely-agent 与组件库的包重名，写 `ely-mail@0.1`

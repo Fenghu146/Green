@@ -20,6 +20,7 @@ target/debug/green.exe path/to/note.md
 ```
 
 - 构建产物在仓库自己的 `target/`（见 `.cargo/config.toml`），不与别的项目共用。
+- **`patches/` 是来源，`vendor/` 是快照，CI 保证两者一致**：`vendor/` 入库，`git clone` 就能离线构建；CI 的 `vendor` job 把三条补丁序列重放到上游版本，再与 `vendor/` 逐文件比对。改依赖时改 `patches/` 与脚本，然后 `scripts/vendor-gpui.sh write`、`scripts/vendor-components.sh write`、`scripts/vendor-crates.sh write`，不要只手改 `vendor/`。细则见 [`patches/README.md`](patches/README.md)。
 - `ELY_SMOKE=1` 画一帧即退出；`ELY_LOG` 设日志级别；`ELY_APPEARANCE=light|dark|system` 覆盖主题。
 - 开发构建从 `assets/fonts/` 读字体；打包后从可执行文件旁的 `fonts/` 读。
 - 应用数据在 `%LOCALAPPDATA%\Green\green\`：日志 `ely.log`、设置 `settings.json`、会话 `session.json`。

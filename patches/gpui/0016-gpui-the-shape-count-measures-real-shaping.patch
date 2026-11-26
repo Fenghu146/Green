@@ -1,0 +1,60 @@
+baseline: gpui-pre =0.3.14, the version Cargo.toml pins (the crate records no VCS commit; scripts/vendor-gpui.sh holds the tarball hashes)
+bump: If upstream grows a shape counter, drop this. If `shape_line` stops being the shaping entry point, rewrite it there: the count must sit where text is actually shaped.
+
+diff --git a/vendor/gpui-pre/Cargo.toml b/vendor/gpui-pre/Cargo.toml
+index b37d3f9..6c42a6a 100644
+--- a/vendor/gpui-pre/Cargo.toml
++++ b/vendor/gpui-pre/Cargo.toml
+@@ -51,6 +51,8 @@ zed-version = "0.2.2"
+ zed-rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
+ 
+ [features]
++# Green: counts text shaping, to prove folding never re-lays text. Off by default.
++shape-count = []
+ bench = ["bench-support"]
+ bench-support = [
+     "profiler",
+diff --git a/vendor/gpui-pre/src/text_system.rs b/vendor/gpui-pre/src/text_system.rs
+index 0b75b98..7383d12 100644
+--- a/vendor/gpui-pre/src/text_system.rs
++++ b/vendor/gpui-pre/src/text_system.rs
+@@ -228,6 +228,11 @@ impl Drop for MissingGlyphReceiver {
+ }
+ 
+ /// The GPUI text rendering sub system.
++/// Green: text shaping calls, for the folding test. Compiled in only with
++/// `shape-count`; release builds leave it out.
++#[cfg(feature = "shape-count")]
++pub static SHAPED_LINES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
++
+ pub struct TextSystem {
+     platform_text_system: Arc<dyn PlatformTextSystem>,
+     font_ids_by_font: RwLock<FxHashMap<Font, CachedFont>>,
+@@ -669,6 +674,18 @@ impl WindowTextSystem {
+     /// Note that this method can only shape a single line of text. It will panic
+     /// if the text contains newlines. If you need to shape multiple lines of text,
+     /// use [`Self::shape_text`] instead.
++    /// Green: lines shaped so far, when the `shape-count` feature is on.
++    #[cfg(feature = "shape-count")]
++    pub fn shaped_lines() -> usize {
++        SHAPED_LINES.load(std::sync::atomic::Ordering::Relaxed)
++    }
++
++    /// Green: start counting again.
++    #[cfg(feature = "shape-count")]
++    pub fn reset_shaped_lines() {
++        SHAPED_LINES.store(0, std::sync::atomic::Ordering::Relaxed);
++    }
++
+     pub fn shape_line(
+         &self,
+         text: SharedString,
+@@ -680,6 +697,8 @@ impl WindowTextSystem {
+             text.find('\n').is_none(),
+             "text argument should not contain newlines"
+         );
++        #[cfg(feature = "shape-count")]
++        SHAPED_LINES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+ 
+         let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
+         for run in runs {

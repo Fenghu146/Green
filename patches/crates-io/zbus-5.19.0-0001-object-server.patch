@@ -1,0 +1,108 @@
+baseline: zbus 5.19.0 from crates.io (tarball sha256 5db4be7c075cb421e4b7ee645541604239bd243ba7c357511f4ff3a74b555907)
+bump: If the object server already prunes ancestors left empty when a path is removed, drop this. If `ObjectServer::remove` or the node tree changed shape, rewrite.
+
+diff --git a/vendor/zbus/src/object_server/mod.rs b/vendor/zbus/src/object_server/mod.rs
+index fdd3a48..3211dc7 100644
+--- a/vendor/zbus/src/object_server/mod.rs
++++ b/vendor/zbus/src/object_server/mod.rs
+@@ -232,15 +232,8 @@ impl ObjectServer {
+                 .await?;
+         }
+         if node.is_empty() {
+-            let mut path_parts = path.rsplit('/').filter(|i| !i.is_empty());
+-            let last_part = path_parts.next().unwrap();
+-            let ppath = ObjectPath::from_string_unchecked(
+-                path_parts.fold(String::new(), |a, p| format!("/{p}{a}")),
+-            );
+-            root.get_child_mut(&ppath, false)
+-                .0
+-                .unwrap()
+-                .remove_node(last_part);
++            // Empty ancestors go too, else each removed path leaves its branch behind.
++            root.prune(&path);
+             return Ok(true);
+         }
+         Ok(false)
+diff --git a/vendor/zbus/src/object_server/node.rs b/vendor/zbus/src/object_server/node.rs
+index 1b66a0f..efcae73 100644
+--- a/vendor/zbus/src/object_server/node.rs
++++ b/vendor/zbus/src/object_server/node.rs
+@@ -106,8 +106,33 @@ impl Node {
+         })
+     }
+ 
+-    pub(super) fn remove_node(&mut self, node: &str) -> bool {
+-        self.children.remove(node).is_some()
++    /// Removes the node at `path` and the ancestors that only led to it.
++    ///
++    /// An ancestor stays if it has other children, interfaces of its own or an `ObjectManager`.
++    pub(super) fn prune(&mut self, path: &ObjectPath<'_>) -> bool {
++        let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
++        if parts.is_empty() {
++            return false;
++        }
++        let mut node = &*self;
++        let mut keep = 0;
++        for (depth, part) in parts.iter().enumerate() {
++            let Some(child) = node.children.get(*part) else {
++                return false;
++            };
++            let needed = child.children.len() > 1
++                || !child.is_empty()
++                || child.interfaces.contains_key(&ObjectManager::name());
++            if depth + 1 < parts.len() && needed {
++                keep = depth + 1;
++            }
++            node = child;
++        }
++        let mut node = &mut *self;
++        for part in &parts[..keep] {
++            node = node.children.get_mut(*part).expect("walked above");
++        }
++        node.children.remove(parts[keep]).is_some()
+     }
+ 
+     pub(super) fn add_arc_interface(
+@@ -255,3 +280,42 @@ impl Node {
+             .await
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::Node;
++    use crate::fdo::ObjectManager;
++    use zvariant::ObjectPath;
++
++    fn path(p: &str) -> ObjectPath<'_> {
++        ObjectPath::try_from(p).unwrap()
++    }
++
++    fn make(root: &mut Node, p: &str) {
++        root.get_child_mut(&path(p), true).0.unwrap();
++    }
++
++    #[test]
++    fn prune_takes_the_branch_that_only_led_to_the_node() {
++        let mut root = Node::new("/".try_into().unwrap());
++        make(&mut root, "/a/b/c");
++        make(&mut root, "/a/d");
++        make(&mut root, "/x/y");
++        assert!(root.prune(&path("/a/b/c")));
++        assert!(root.get_child(&path("/a/b")).is_none());
++        assert!(root.get_child(&path("/a/d")).is_some(), "a sibling keeps its parent");
++        assert!(root.prune(&path("/x/y")));
++        assert!(root.get_child(&path("/x")).is_none());
++        assert!(!root.prune(&path("/x/y")), "gone already");
++    }
++
++    #[test]
++    fn prune_keeps_an_object_manager() {
++        let mut root = Node::new("/".try_into().unwrap());
++        make(&mut root, "/m/n/o");
++        root.get_child_mut(&path("/m"), false).0.unwrap().add_interface(ObjectManager);
++        assert!(root.prune(&path("/m/n/o")));
++        assert!(root.get_child(&path("/m/n")).is_none());
++        assert!(root.get_child(&path("/m")).is_some());
++    }
++}

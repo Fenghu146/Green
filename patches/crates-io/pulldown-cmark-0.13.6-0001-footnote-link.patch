@@ -1,0 +1,16 @@
+baseline: pulldown-cmark 0.13.6 from crates.io (tarball sha256 3db2be46835f013dd3f4fa7f5f7402c537787b54ebb6fe2b94bbdd7e2669bb7b)
+bump: If a link may hold a footnote reference upstream, as GFM reads it, drop this. If the link and reference parsers moved, rewrite.
+
+diff --git a/vendor/pulldown-cmark/src/parse.rs b/vendor/pulldown-cmark/src/parse.rs
+index 842fe9c..cfe62d6 100644
+--- a/vendor/pulldown-cmark/src/parse.rs
++++ b/vendor/pulldown-cmark/src/parse.rs
+@@ -814,7 +814,7 @@ impl<'input, F: BrokenLinkCallback<'input>> Parser<'input, F> {
+                                     self.tree[footnote_ix].item.end = end;
+                                     prev = Some(footnote_ix);
+                                     cur = next;
+-                                    self.link_stack.clear();
++                                    // As in GFM, a link may hold a footnote reference.
+                                     continue;
+                                 }
+                             } else if let Some((ReferenceLabel::Link(link_label), end)) = label {

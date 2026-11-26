@@ -1,0 +1,227 @@
+name: ci
+
+on:
+  # Every branch: a feature branch's first push is where a new workflow earns
+  # its trust, and main is not the only place a break lands.
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Python's UTF-8 mode: a Windows console is cp1252, and this repo prints Chinese.
+  PYTHONUTF8: 1
+  # Incremental artifacts are the bulk of a debug target and the cache restores
+  # whole crates anyway; turning them off buys back gigabytes.
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # The runners share the workspace drive with the build; a full disk fails rustc
+  # with no useful message. This names the number and the directories first.
+  disk:
+    name: disk
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: scripts/disk.sh 4G .
+
+  build:
+    name: build
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      # rust-toolchain.toml pins the channel and its components; the first
+      # cargo call installs them.
+      - run: rustup show active-toolchain
+      - run: cargo build -p green --locked
+
+  test:
+    name: test
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # A red run still leaves the next one a cache to restore.
+          cache-on-failure: true
+      - run: rustup show active-toolchain
+      # ely-lok as its own package: under the workspace's unified features three
+      # view::reveal tests need a LOK kernel and panic without ELY_LOK_DIR.
+      - run: cargo test -p ely-lok --locked
+      # ely-pdf-worker's build script refuses to run without libmupdf.lib, which
+      # scripts/build-mupdf.sh produces; no runner has that build, and no other
+      # package depends on it, so it is excluded rather than skipped silently.
+      #
+      # When green-math's conversion gets its real-typst test (the one that reads
+      # GREEN_TYPST and compiles the output), install the Typst CLI at the typst
+      # version in Cargo.toml here and export GREEN_TYPST — the skips step below
+      # fails the job until then, on purpose. As of 2026-11-26 no test reads
+      # GREEN_TYPST, so there is nothing to wire yet.
+      - shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --exclude ely-pdf-worker --exclude ely-lok --exclude green --locked 2>&1 | tee tests.log
+      # A skip nobody sees is a test that does not exist; this writes every one
+      # of them to the job summary, and fails on one skipped for a missing tool.
+      - if: always()
+        shell: bash
+        run: scripts/skips.sh tests.log
+
+  test-app:
+    name: test green
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: rustup show active-toolchain
+      # Red on main as of 2026-11-26, for two errors in test code that the S2
+      # working tree already fixes: apps/green/src/output/tests.rs calls
+      # ely_pdf_engine (not a dev-dependency of green), and
+      # apps/green/src/desk/tests.rs calls Desk::tree_failed (no such method).
+      # Kept enabled on purpose: turning it off is how that breakage would go
+      # unnoticed. It goes green when S2 lands.
+      - shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p green --locked 2>&1 | tee tests.log
+      - if: always()
+        shell: bash
+        run: scripts/skips.sh tests.log
+
+  lint:
+    name: lint
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: rustup show active-toolchain
+      # Warnings do not fail the job. One is open and ours: clippy::type_complexity
+      # in green-math's `cached` (the SEEN OnceLock type). `vendor/` is upstream
+      # code with its own lints, so its warnings are counted apart and never gate
+      # us. When our count reaches zero, the gate is `test ! -s ours.log`.
+      - shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --exclude ely-pdf-worker --no-deps --lib --bins --locked \
+            --message-format short -- -W clippy::all 2>&1 | tee clippy.log
+          grep ': warning: ' clippy.log | grep -v '^vendor' >ours.log || true
+          grep ': warning: ' clippy.log | grep '^vendor' >vendored.log || true
+          ours=$(grep -c . ours.log || true)
+          vendored=$(grep -c . vendored.log || true)
+          echo "clippy: $ours in our crates, $vendored in vendored code (not our lint)" >>"$GITHUB_STEP_SUMMARY"
+          cat ours.log >>"$GITHUB_STEP_SUMMARY" || true
+
+  # The release benchmark, off the PR path on purpose: its numbers move with
+  # whatever else the machine is doing, and a gate that reddens under load
+  # teaches people to ignore red. Design §5.4: CI runs the release benchmark
+  # alone. The debug run prints and never gates, and both benchmarks are
+  # #[ignore]d, so the ordinary test jobs see them as ignored, not failed.
+  bench:
+    name: bench (release)
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: rustup show active-toolchain
+      - shell: bash
+        run: |
+          set -o pipefail
+          cargo test --release -p green --features shape-count --locked -- --ignored --nocapture 2>&1 | tee bench.log
+      # The number and the machine that took it, together: the tests print both.
+      - if: always()
+        shell: bash
+        run: |
+          grep -E '^(folding|outline):' bench.log >>"$GITHUB_STEP_SUMMARY" || true
+          scripts/skips.sh bench.log
+
+  tools:
+    name: tools
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup show active-toolchain
+      # Formatting is gated here and only here: tools/ is rustfmt-clean, while the
+      # product tree is not — 678 files differ at the pinned 1.9.0 with the 2024
+      # style edition — so a workspace-wide gate would be red for reasons that are
+      # not this workflow's to fix. Add `cargo fmt --all --check` in the commit
+      # that formats apps/ and crates/.
+      - run: cargo fmt --manifest-path tools/Cargo.toml --check
+      - run: cargo clippy --manifest-path tools/Cargo.toml --all-targets --locked -- -D warnings
+      - run: cargo test --manifest-path tools/Cargo.toml --locked
+      # The committed fixtures must be exactly what the generator writes.
+      - run: cargo run --manifest-path tools/Cargo.toml --bin fixtures --locked -- --check
+
+  licenses:
+    name: licenses
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.22.1
+      # Whitelist in deny.toml: AGPL fails by omission, MPL only for the crates
+      # named there. `-D unnecessary-skip` keeps the bans skip list honest.
+      - run: cargo deny check -D unnecessary-skip -D unmatched-skip
+
+  # vendor/ is a build input: these replay the patch series against the pinned
+  # upstreams and compare the result with what is committed, file by file.
+  vendor:
+    name: vendor
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: scripts/vendor-gpui.sh check
+      - shell: bash
+        run: scripts/vendor-components.sh check
+      - shell: bash
+        run: scripts/vendor-crates.sh check
+      # docs/compatibility.md names the pins and the patch counts; this says it
+      # still does.
+      - shell: bash
+        run: python scripts/compatibility.py --check
+
+  notices:
+    name: notices
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.8.2
+      - run: rustup show active-toolchain
+      - shell: bash
+        run: scripts/notices.sh
+      # THIRD-PARTY-NOTICES.txt is generated; a dependency change that skips it
+      # would ship notices that no longer match Cargo.lock.
+      - shell: bash
+        run: git diff --exit-code -- THIRD-PARTY-NOTICES.txt
