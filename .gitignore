@@ -34,3 +34,7 @@ vendor/target/
 
 # Amp thread scratch
 /.amp/in/
+
+# Real notes: private source, never committed
+/fixtures/real/local/
+

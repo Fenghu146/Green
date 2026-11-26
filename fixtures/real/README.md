@@ -73,3 +73,16 @@
 3. 谁的排版坏了，从一个最小的真实文档复现，而不是从生成夹具里复现。
 
 生成夹具负责「大小」，这里负责「像」。
+
+## 六、真实笔记的脱敏骨架
+
+九份本人学习笔记的原文放在 `fixtures/real/local/`，该目录由仓库根的 `.gitignore` 排除，**不入库、不上报**。
+可提交的是 `fixtures/real/skeletons/` 下的同名骨架：由 `tools/redact.py` 生成，保留标题层级、表格、公式、
+代码块与符号，成段说明文字换成占位符。生成与校验：
+
+```sh
+python tools/redact.py fixtures/real/local fixtures/real/skeletons
+python tools/redact.py --verify fixtures/real/skeletons
+```
+
+来源：本人笔记；许可与仓库一致；已脱敏。渲染与导出的逐份核对报告只在本机保留，不入库。
