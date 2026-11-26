@@ -51,7 +51,7 @@ fn parse(args: &[String]) -> Result<Request, String> {
     let mut theme = None;
     let mut width = 1400.0;
     let mut height = 900.0;
-    let mut settle = Duration::from_millis(8000);
+    let mut settle = Duration::from_millis(15000);
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let mut value = |name: &str| -> Result<String, String> {

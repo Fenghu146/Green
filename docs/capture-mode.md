@@ -25,7 +25,7 @@ green --capture out.png [--theme light|dark] [--width N] [--height N] [--wait-ms
 | `--capture <path>` | 无 | 出现即进入截图模式；父目录不存在即报错，不自动创建 |
 | `--theme light\|dark` | `light` | 没有桌面可问系统，`system` 直接拒绝 |
 | `--width` / `--height` | 1400 / 900 | 逻辑像素；PNG 尺寸 = 逻辑 × 平台缩放（本机 170% → 2374×1378） |
-| `--wait-ms` | 8000 | 最多等画面收敛这么久；超过即失败，不拿最后一帧充数 |
+| `--wait-ms` | 15000 | 最多等画面稳定这么久；超过即失败，不拿最后一帧充数 |
 | `<file.md>` | 无 | 恰好一个位置参数 |
 
 退出码：0 写好 PNG；2 参数错（含"这个构建没有 capture"）；3 这台机器没有可用渲染后端；4 窗口没画出来；5 写盘失败或截到空白帧（空白帧改存 `<out>.blank.png`）。
@@ -38,7 +38,8 @@ green --capture out.png [--theme light|dark] [--width N] [--height N] [--wait-ms
 2. **窗口**：走与正常启动同一串安装（字体、组件库、设置、主题、i18n、键位、`shell::want_scene()`），同一个 root（`desk::open`），只把 `WindowOptions` 换成 `show: false, focus: false`，尺寸取 `--width/--height`。文件经 `opening::install_launch_files` 交给 root，和正常启动的 `launch_files` 是同一条路。
 3. **帧从哪来**：平台的帧循环**不会**给没显示过的窗口画帧（第一版只截到启动画面与背景色）。所以截图的帧自己画：`window.draw(cx)` 之后用 `Window::render_to_image()` 交给 DirectX 渲染器离屏读回，隔 100 ms 再画下一帧。
 4. **启动画面要撤**：`shell` 的启动画面在 `startup::started()` 之后才离开。正常启动由平台的"下一帧回调"打这个标记；截图路径在开窗后直接调用 `ely_platform::startup::started()` 并 `refresh()`，画面才会换成文档。
-5. **收敛判定**（替掉固定等待）：每帧记下像素，**连续两帧完全相同**即取这一帧落盘——前提是（a）文档已画出来（`Desk::shown`：首个标签的视图报过显示），（b）距文档出现已过 600 ms。两个前提针对同一种假收敛：文档还没到手、公式还在排时，"两帧一样"只是"什么都还没发生"。超过 `--wait-ms` 仍不收敛即 `exit 4`，**不写文件**，绝不拿最后一帧充数。
+5. **收敛判定**（替掉固定等待）：每帧记下像素，**画面连续 2 秒不变**即取这一帧落盘——前提是文档已画出来（`Desk::shown`：首个标签的视图报过显示）。超过 `--wait-ms`（默认 15 s）仍不稳定即 `exit 4`，**不写文件**，绝不拿最后一帧充数。
+   为什么不是"两帧相同"：一开始就是这条规则，它挡不住一种假收敛——文档出来后、Typst 的公式落地前，帧确实一模一样两三次，于是截到的是**公式的 LaTeX 源码**（实测到过一次，见 §4）。这段等待在帧状态里完全看不见（gpui 不对外暴露"后台还有排版在跑"），所以用一段不短于实测间隙的静默时间来代替。代价是每次都多等 2 秒；慢机器上若排版间隙真的超过 2 秒，仍可能截到源码——那是这条判定的已知上限，`--wait-ms` 只兜住总时长。
 6. **指针要离开窗口，而且要让它知道**：文档里的每个块都是带 `.hover()` 的 div，指针压在哪个块上，那个块就画一层 `colors.hover` 高亮。Windows 的 `mouse_position()` 是 `GetCursorPos` + `ScreenToClient`，没显示的窗口同样算数；更麻烦的是 gpui 的指针位置**只在 `bounds_changed` 时向平台重读**，其它时候用缓存。于是光把窗口移走不够：第一帧读到的还是"窗口还在指针下面"时的坐标，之后一直沿用——这正是"同一命令 8 次里 2 次多出一块灰底"的根因（每次运行鼠标位置不同，压中的块也不同）。
    修法：把窗口移到 `(-32000, -32000)`（`SetWindowPos`，不显示、不改尺寸），然后**在开头几帧再 `bounds_changed` 一次**，让 gpui 重新读到"指针在窗口外"（实测读出 `16259,16218`，窗口只有 `1187×689`）。移窗到生效有延迟，第一帧读到旧值，所以这一步要跨帧做。
 7. **离屏读回靠基座**：`Window::render_to_image()` 在 gpui 的 `test-support` 特性下，Windows 侧接到 `WindowsWindow` 的 `render_to_image`（D3D 渲染器渲染到离屏目标再读回，**不 Present**）。因此 `ely-ui` 有 `capture` 特性（`gpui/test-support` + `gpui_windows/test-support`），`green` 有 `capture = ["ely-ui/capture"]`；发行包不开，体积与代码面不变。
@@ -55,8 +56,8 @@ cargo run -p green --features capture -- --capture out.png --theme dark doc.md
 
 | 项 | 结果 |
 | --- | --- |
-| 一次的时间 | `tests/fixtures/capture.md`（2 条行内、2 条块级公式）2.4–2.8 s 全程，收敛于第 4 帧；首帧到落盘约 0.7 s |
-| 高负载 8 次 | 并行 `cargo check` 把 CPU 压到 84–87% 时连跑 8 次，8/8 同一哈希 `905A8929…`，每次都第 4 帧收敛 |
+| 一次的时间 | `tests/fixtures/capture.md`（2 条行内、2 条块级公式）空闲时 4.4–4.8 s、11–13 帧；高负载下一次可到 8.7 s |
+| 高负载 8 次 | 并行 `cargo check` 把 CPU 压到 84–87% 时连跑 8 次，8/8 同一哈希 `905A8929…`（11–12 帧，4.4–8.7 s） |
 | 内容 | 标题、正文、代码块、列表、**行内与块级公式**（Typst 已排好）都在 |
 | 同一命令多次 | PNG 逐字节相同（SHA-256 `905A8929…`，连跑 5 次与换用收敛判定前后都不变） |
 | 超时 | `--wait-ms 400` → `exit 4`、"no frame settled within 400 ms (2 frames drawn)"，**没有写文件** |
@@ -91,10 +92,11 @@ v1 只投 Windows。macOS 与 Linux 的这条路径**没有编译过、也没有
 
 ## 8. Windows 事实（实测，勿重跑）
 
-2026-11-26，Windows 11 build 26200，本机。这三条已经跑过，别再花时间验证：
+2026-11-26，Windows 11 build 26200，本机。这四条已经跑过，别再花时间验证：
 
 1. **新建窗口落在启动那一刻活动的虚拟桌面上，之后不动。** 同一台机器三次启动时用户都在第 2 个桌面（index 1），窗口就落在 index 1（`IsWindowOnCurrentVirtualDesktop=1`）；更早一次当前在 index 0，窗口同样落在 index 0。所以"用户在桌面二干活、Green 在桌面一跑"只在**窗口创建时用户还在桌面一**的情况下成立：创建后再切走，窗口留在原处；创建时用户已在桌面二，窗口就出现在他那边（`ELY_SMOKE=hold` 仍不抢焦点）。
-2. **指针位置会改变画面。** 文档块带 `.hover()`，指针压着哪个块，那个块就多一层 `colors.hover` 半透明底；`WindowsWindow::mouse_position()` 用 `GetCursorPos` + `ScreenToClient`，没显示的窗口也算数，而且 gpui 只在 `bounds_changed` 时重读它。截图必须先移窗、再让 gpui 重读指针（见 §2 第 6 条），否则同一命令会写出不同的 PNG。
-3. **`MoveWindowToDesktop` 不能搬别的进程的窗口。** 对 green.exe 的窗口返回 `E_ACCESSDENIED`（对本进程自己的窗口可以，返回 `S_OK` 且 `IsWindowOnCurrentVirtualDesktop` 随之为 0）。读的一侧跨进程可用：`IsWindowOnCurrentVirtualDesktop`、`GetWindowDesktopId`；桌面清单从 `HKCU\...\Explorer\VirtualDesktops\VirtualDesktopIDs`（显示顺序，每 16 字节一个 GUID）与 `CurrentVirtualDesktop` 读，不需要 COM。
+2. **两帧相同不等于画完。** 文档出现后、公式落地前的帧可以完全一样（实测截到过 LaTeX 源码），因为 gpui 不对外给"后台还有排版"的信号。所以判据是"连续 2 秒不变"，不是"两帧相同"。
+3. **指针位置会改变画面。** 文档块带 `.hover()`，指针压着哪个块，那个块就多一层 `colors.hover` 半透明底；`WindowsWindow::mouse_position()` 用 `GetCursorPos` + `ScreenToClient`，没显示的窗口也算数，而且 gpui 只在 `bounds_changed` 时重读它。截图必须先移窗、再让 gpui 重读指针（见 §2 第 6 条），否则同一命令会写出不同的 PNG。
+4. **`MoveWindowToDesktop` 不能搬别的进程的窗口。** 对 green.exe 的窗口返回 `E_ACCESSDENIED`（对本进程自己的窗口可以，返回 `S_OK` 且 `IsWindowOnCurrentVirtualDesktop` 随之为 0）。读的一侧跨进程可用：`IsWindowOnCurrentVirtualDesktop`、`GetWindowDesktopId`；桌面清单从 `HKCU\...\Explorer\VirtualDesktops\VirtualDesktopIDs`（显示顺序，每 16 字节一个 GUID）与 `CurrentVirtualDesktop` 读，不需要 COM。
 
 所以"事后把窗口搬回桌面一"这条路不成立；未公开接口的 IID 随版本变，不硬码。这也是 `--capture` 成为唯一干净答案的原因。

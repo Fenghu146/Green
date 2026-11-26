@@ -103,12 +103,13 @@ pub fn run<V: Render>(
     code.get()
 }
 
-/// Draws until two frames in a row are the same, then writes that frame.
+/// Draws until the picture has stopped changing, then writes it.
 ///
 /// The platform never draws a window it does not show, so every frame here is drawn by hand.
-/// A picture is only taken once the document is in, the frame has had time for work the app
-/// starts after it shows (Typst sets formulas in the background), and two frames agree: a
-/// frame the engine is still changing is not a picture of anything repeatable.
+/// The picture is taken once the document is in and one frame has stood unchanged for
+/// `STILL`: two frames alone can agree while the app is still working on work no frame
+/// shows yet — Typst sets formulas in the background, and the frames before they land look
+/// settled.
 async fn settled_frame(
     cx: &mut gpui::AsyncApp,
     handle: gpui::AnyWindowHandle,
@@ -116,10 +117,10 @@ async fn settled_frame(
     timeout: Duration,
     ready: &dyn Fn(&App) -> bool,
 ) -> Result<(), (i32, String)> {
-    // Before this, two equal frames can mean "nothing has happened yet".
-    const SETTLE: Duration = Duration::from_millis(600);
+    // Longer than the gap measured between "the document is drawn" and the formulas landing.
+    const STILL: Duration = Duration::from_millis(2000);
     let started = std::time::Instant::now();
-    let mut shown_at: Option<std::time::Instant> = None;
+    let mut stable_since: Option<std::time::Instant> = None;
     let mut last: Option<image::RgbaImage> = None;
     let mut drawn = 0u32;
     loop {
@@ -160,16 +161,20 @@ async fn settled_frame(
             Err(error) => return Err((TIMEOUT, format!("the window went before its frame: {error:#}"))),
         };
         if let Some((true, image)) = frame {
-            let at = *shown_at.get_or_insert_with(std::time::Instant::now);
-            // Two frames in a row the same, after the work the document starts has had time.
-            let after_settle = at.elapsed() >= SETTLE;
-            if after_settle && last.as_ref().is_some_and(|before| before.as_raw() == image.as_raw()) {
+            let unchanged = last.as_ref().is_some_and(|before| before.as_raw() == image.as_raw());
+            let since = *stable_since.get_or_insert_with(std::time::Instant::now);
+            if unchanged && since.elapsed() >= STILL {
                 return save(&image, output);
+            }
+            if !unchanged {
+                // A new picture: the count starts again.
+                stable_since = Some(std::time::Instant::now());
             }
             last = Some(image);
         } else {
             // Before the document shows, nothing is a picture of the document.
             last = None;
+            stable_since = None;
         }
         cx.background_executor()
             .timer(Duration::from_millis(100))
