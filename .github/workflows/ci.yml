@@ -17,6 +17,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Python's UTF-8 mode: a Windows console is cp1252, and this repo prints Chinese.
+  PYTHONUTF8: 1
 
 jobs:
   build:

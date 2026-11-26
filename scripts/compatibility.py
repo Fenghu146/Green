@@ -52,6 +52,8 @@ def lines():
 
 
 def main():
+    # This prints Chinese to whatever console CI gives it; cp1252 would raise.
+    sys.stdout.reconfigure(encoding="utf-8")
     page = read(PAGE).split("\n")
     if page.count(MARK) != 1:
         sys.exit(f"compatibility.py: {PAGE} needs the marker line once")
