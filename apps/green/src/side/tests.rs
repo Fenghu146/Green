@@ -451,6 +451,7 @@ fn a_heading_in_the_outline_jumps_and_unfolds_the_text(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+#[ignore = "benchmark: run by hand on a quiet machine, e.g. cargo test --release -p green -- --ignored --nocapture"]
 fn a_long_outline_opens_quickly(cx: &mut TestAppContext) {
     let (data, files) = (
         tempfile::tempdir().expect("data"),
@@ -469,7 +470,7 @@ fn a_long_outline_opens_quickly(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     let took = start.elapsed();
-    println!("outline: 3000 headings opened in {took:?}");
+    println!("outline: 3000 headings opened in {took:?}, {}", crate::bench::machine());
     // Debug bounds exist only in debug builds.
     if cfg!(debug_assertions) {
         assert!(cx.debug_bounds("outline-row-0").is_some(), "the tree draws");
@@ -478,11 +479,9 @@ fn a_long_outline_opens_quickly(cx: &mut TestAppContext) {
             "only the rows in view draw"
         );
     }
-    // A debug build is the slow bench; the release build holds design §9.
-    let goal = if cfg!(debug_assertions) {
-        std::time::Duration::from_millis(300)
-    } else {
-        std::time::Duration::from_millis(100)
-    };
-    assert!(took < goal, "3000 headings took {took:?}, over {goal:?}");
+    // Only a release build holds design §9; a debug build's number is printed.
+    if !cfg!(debug_assertions) {
+        let goal = std::time::Duration::from_millis(100);
+        assert!(took < goal, "3000 headings took {took:?}, over {goal:?}");
+    }
 }

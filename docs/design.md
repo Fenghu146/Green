@@ -183,6 +183,8 @@ stdin 收 `{apiVersion, path, ext, content(base64), contentOmitted}`，stdout �
 
 折叠/展开改变的是可见集合与后续块的 y 偏移，不得触发任何**文字重排**（re-shape）。S2 验收：5 万字文档，单次折叠 ≤ 16 ms，且测量窗口内 shape 调用次数为 0。
 
+基准单独跑：折叠（5 万字 × 30 次，看 P95 与 shape）与 3000 标题打开大纲这两项是 `#[ignore]` 的基准，只在空载时手动跑，例如 `cargo test --release -p green --features shape-count -- --ignored --nocapture`；输出带当时的 CPU 负载。debug 只打印数字、不设门禁，门禁只有 release 的 16 ms 与 shape 0。CI 只跑 release 基准，不跑 debug 基准——一个只在并行编译时才会红的测试，会训练所有人忽略红色。
+
 ## 6. 行内公式（S2 必须先解）
 
 v0.3 把它列为风险并给了「降级为源码」的退路——**作废**。用户的笔记就是 `通项 $a_n=\left(\frac{2}{5}\right)^{n-1}$，是等比级数` 这种中文与行内公式混排，降级等于废掉主要用法。

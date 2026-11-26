@@ -1,5 +1,6 @@
 //! Folding's numbers: a 5万字 file's folds stay inside 16 ms, and lay no
-//! text out again (design §5.4, §9).
+//! text out again (design §5.4, §9). A benchmark, not a gate: it is `#[ignore]`d
+//! and run by hand when the machine is quiet.
 
 use std::time::{Duration, Instant};
 
@@ -45,6 +46,7 @@ fn target(view: &Entity<MarkView>, cx: &mut TestAppContext) -> (usize, usize) {
 }
 
 #[gpui::test]
+#[ignore = "benchmark: run by hand on a quiet machine, e.g. cargo test --release -p green --features shape-count -- --ignored --nocapture"]
 fn folding_fifty_thousand_characters_keeps_the_goal(cx: &mut TestAppContext) {
     let (view, cx) = open(&long_text(), cx);
     let (at, line) = target(&view, cx);
@@ -84,11 +86,11 @@ fn folding_fifty_thousand_characters_keeps_the_goal(cx: &mut TestAppContext) {
         shapes.push(gpui::WindowTextSystem::shaped_lines());
     }
     let p95 = p95(times.clone());
-    let cores = std::thread::available_parallelism().map_or(0, |n| n.get());
     println!(
-        "folding: 30 toggles, p95 {:?}, max {:?}, {cores} logical cores",
+        "folding: 30 toggles, p95 {:?}, max {:?}, {}",
         p95,
         times.iter().max().copied().unwrap_or_default(),
+        crate::bench::machine(),
     );
     #[cfg(feature = "shape-count")]
     {
@@ -99,11 +101,10 @@ fn folding_fifty_thousand_characters_keeps_the_goal(cx: &mut TestAppContext) {
             "folding and unfolding must lay no text out again: {shapes:?}"
         );
     }
-    // A debug build is the slow bench; the release build holds design §9.
-    let goal = if cfg!(debug_assertions) {
-        Duration::from_millis(50)
-    } else {
-        Duration::from_millis(16)
-    };
-    assert!(p95 <= goal, "folding's p95 is {p95:?}, over {goal:?}");
+    // Only a release build holds design §9; a debug build's number is printed,
+    // not gated, since it runs an order of magnitude slower.
+    if !cfg!(debug_assertions) {
+        let goal = std::time::Duration::from_millis(16);
+        assert!(p95 <= goal, "folding's p95 is {p95:?}, over {goal:?}");
+    }
 }

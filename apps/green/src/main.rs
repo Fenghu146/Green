@@ -3,6 +3,8 @@
 
 mod attach;
 mod autosave;
+#[cfg(test)]
+mod bench;
 mod blocks;
 mod clip;
 mod compare;
