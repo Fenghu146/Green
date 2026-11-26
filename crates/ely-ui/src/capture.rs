@@ -134,18 +134,29 @@ async fn settled_frame(
         }
         let drew = cx.update(|cx| {
             cx.update_window(handle, |_, window, cx| {
+                // The move lands a moment after it is asked for, so ask, then read the
+                // pointer again: until it is read from the parked window it stays where it
+                // was when the window was still under it, and a block wears a hover.
+                if drawn < 3 {
+                    park(window);
+                    window.bounds_changed(cx);
+                }
                 window.draw(cx).clear(cx);
                 let size = window.viewport_size();
-                (size, ready(cx), window.render_to_image())
+                let pointer = window.mouse_position();
+
+                (size, ready(cx), pointer, window.render_to_image())
             })
         });
         let frame = match drew {
-            Ok((size, ready, Ok(image))) => {
+            Ok((size, ready, pointer, Ok(image))) => {
                 drawn += 1;
-                log::info!("capture: frame {drawn} at {size:?}, the document shown {ready}");
+                log::info!(
+                    "capture: frame {drawn} at {size:?}, the document shown {ready}, the pointer at {pointer:?}"
+                );
                 Some((ready, image))
             }
-            Ok((_, _, Err(error))) => return Err((BACKEND, format!("no frame came back: {error:#}"))),
+            Ok((_, _, _, Err(error))) => return Err((BACKEND, format!("no frame came back: {error:#}"))),
             Err(error) => return Err((TIMEOUT, format!("the window went before its frame: {error:#}"))),
         };
         if let Some((true, image)) = frame {
