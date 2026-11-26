@@ -85,6 +85,9 @@ python tools/redact.py fixtures/real/local fixtures/real/skeletons
 python tools/redact.py --verify fixtures/real/skeletons
 ```
 
+脱敏时表格单元格里的公式、实体、`\|` 与标题里的公式同样保留，只把成段中文换成占位符；
+这个保真规则在 2026-11-26 补上，避免骨架把真正会炸的公式一起删掉。
+
 来源：本人笔记；许可与仓库一致；已脱敏。渲染与导出的逐份核对报告只在本机保留，不入库。
 
 **规矩：骨架入库、原文不入库；能过才进 CI，不过的进 `STATUS.md` 已知债。**

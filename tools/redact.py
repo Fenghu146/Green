@@ -26,30 +26,36 @@ SPANS = re.compile(r"(\$\$.*?\$\$|\$[^$\n]+\$|`[^`\n]+`|&#?[A-Za-z0-9]+;)")
 SCRIPT = re.compile(r"[\u00b2\u00b3\u00b9\u2070-\u209f\u1d62-\u1d6a]")
 
 
-def outside(text):
-    """The parts of `text` that are not protected, as (start, end) spans."""
-    spans = []
+def segments(text):
+    """`text` as (piece, protected) pairs; a protected piece is kept verbatim."""
     at = 0
     for found in SPANS.finditer(text):
-        spans.append((at, found.start()))
+        if found.start() > at:
+            yield text[at : found.start()], False
+        yield found.group(), True
         at = found.end()
-    spans.append((at, len(text)))
-    return spans
+    if at < len(text):
+        yield text[at:], False
 
 
 def redact_cell(cell):
-    """A table keeps its shape; a cell that reads like a sentence does not."""
-    chinese = len(re.findall(r"[\u4e00-\u9fff]", cell))
-    if chinese >= CELL_PROSE:
-        return f" （{chinese} 字） "
-    return cell
+    """A table keeps its shape, its formulas and its escaped pipes; prose out."""
+    pieces = []
+    for run, protected in segments(cell):
+        if not run:
+            continue
+        chinese = len(re.findall(r"[\u4e00-\u9fff]", run))
+        pieces.append(run if protected or chinese < CELL_PROSE else f"（{chinese} 字）")
+    return "".join(pieces)
 
 
 def redact_row(line):
-    if not line.lstrip().startswith("|"):
+    # A pasted table can start with an escaped pipe; it is still a row.
+    if not line.lstrip().startswith(("|", "\\|")):
         return line
     indent = line[: len(line) - len(line.lstrip())]
-    cells = line.strip().split("|")
+    # An escaped pipe is a character in a cell, not a column boundary.
+    cells = re.split(r"(?<!\\)\|", line.strip())
     if all(set(cell.strip()) <= set("-: ") for cell in cells if cell.strip()):
         return line
     return indent + "|".join(redact_cell(cell) for cell in cells)
@@ -61,12 +67,14 @@ def redact_line(line):
     # Structure that must survive verbatim.
     if line.startswith("#") or line.strip() == "":
         return line
-    if line.lstrip().startswith("|"):
+    if line.lstrip().startswith(("|", "\\|")):
         return redact_row(line)
     pieces = []
-    for start, end in outside(line):
-        run = line[start:end]
+    for run, protected in segments(line):
         if not run:
+            continue
+        if protected:
+            pieces.append(run)
             continue
         # Keep the line's own markers: bullets, numbers, quotes, rules.
         marker = ""
@@ -101,13 +109,20 @@ def leftover(text):
     for number, line in enumerate(text.split("\n"), 1):
         if line.strip().startswith(("#", "```")):
             continue
-        if line.lstrip().startswith("|"):
-            for cell in line.split("|"):
-                if len(re.findall(r"[\u4e00-\u9fff]", cell)) >= CELL_PROSE and "字）" not in cell:
-                    hits.append(f"{number}: cell {cell.strip()[:40]}")
+        if line.lstrip().startswith(("|", "\\|")):
+            for cell in re.split(r"(?<!\\)\|", line.strip()):
+                for piece, protected in segments(cell):
+                    if protected:
+                        continue
+                    run = SCRIPT.sub("", piece)
+                    run = re.sub(r"（\d+ 字）", "", run)
+                    if len(re.findall(r"[\u4e00-\u9fff]", run)) >= CELL_PROSE:
+                        hits.append(f"{number}: cell {run.strip()[:40]}")
             continue
-        for start, end in outside(line):
-            run = SCRIPT.sub("", line[start:end])
+        for piece, protected in segments(line):
+            if protected:
+                continue
+            run = SCRIPT.sub("", piece)
             run = re.sub(r"（正文占位，共 \d+ 字）", "", run)
             if len(run.strip()) >= 12 and re.search(r"[\u4e00-\u9fff]{6}", run):
                 hits.append(f"{number}: {run.strip()[:60]}")
