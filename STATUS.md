@@ -25,6 +25,26 @@
 - 历史记录：2026-11-26 的 main 上 `test-app` job（`cargo test -p green`）因两处测试代码错误红——`apps/green/src/output/tests.rs` 调用了不是 green dev-dependency 的 `ely_pdf_engine`，`apps/green/src/desk/tests.rs` 调用了不存在的 `Desk::tree_failed`；当时 S2 工作树已有修复。该 job 故意保持启用，关掉它只会让同类破坏无人发现。这只记当时的原因，当前状态以 CI 结果为准。
 ## 已知债
 
+### 真实笔记夹具：能过才进 CI，其余进已知债
+
+九份本人笔记的脱敏骨架在 `fixtures/real/skeletons/`；原文在 `fixtures/real/local/`（`.gitignore` 排除），
+不入库。2026-11-26 逐份实测：6 份导出成功、3 份整份失败；成功里面有 3 份的 PDF 公式退化成源码。
+**不用 xfail 把坏结果钉成基线。** CI 正样本白名单只有 `fixtures/real/ci-positive.txt` 中的三份：
+`指令系统`、`数的表示与运算｜完整复习笔记`、`中央处理器CPU`；它们的屏幕显示与导出均已核对通过。
+其余六份不进 CI，按下面的债逐条修；修好一份就把那一份骨架加进白名单，CI 的真实夹具随之多一份。
+
+| 文档（骨架） | 用户会看到什么 | 归属模块与要做的事 |
+| --- | --- | --- |
+| `6.2`、`6.4`、`6.5` | 点导出后整份失败，报 `typst exit code: 1` / `unknown variable: nf`、`ne`、`n2`，拿不到任何 PDF | `crates/green-math/src/lib.rs` 的 `identifiers()`：裸标识符规则只拆 `B052H` 这种“大写字母+数字”，没覆盖字母+字母（`nf`、`ne`）和小写字母+数字（`n2`）。补规则并在 `crates/green-math/src/tests.rs` 加断言。这是转换缺陷，不是环境问题 |
+| 同上三份 | 一条坏公式把整篇导出炸掉，而不是只坏那一条 | `crates/green-export/src/export.rs`：`typst::source()` 的转换失败已有单条降级，`compiler.compile()` 的 Typst 编译失败却直接 `?` 返回。按 `docs/design.md` §7.8 让坏公式降级为字面文本、其余照常导出；这是设计要求的实现缺口，不是新需求 |
+| `6.1`、`6.3`、`数的表示与计算` | PDF 里公式直接显示成源码：`\displaystyle\sum`、`\dfrac`、`\begin{cases}`、`\bigl`、`\mathbb{R}`、`\begin{align*}`；屏幕上都正常 | `crates/green-math/src/lib.rs` 的 TeX→Typst 规则缺这些宏；`crates/green-export/src/typst.rs` 的 `settled()` 只兜住转换器返回 Err，不兜“转成源码但编译通过”。补规则后要用 PDF 文本层断言源码不出现 |
+| 8/9 份（除 `数的表示与计算`）；`6.1`、`6.3` 的 PDF 文本层残留最多 | 屏幕上没事，但从 PDF 复制文字会带出不可见的 U+200B，搜索也可能对不上 | 导出线生成 Typst 文本的入口（`crates/green-export/src/typst.rs` 一带）清理零宽字符；屏幕渲染已正常，不要在编辑器层改 |
+| 九份骨架的侧栏交互（重点抽 `中央处理器CPU` 的 268 个标题、`指令系统` 的 107 个标题） | 折叠箭头与标题层级在静态截图里可见，但侧栏没展开，点击跳转从未验证 | `apps/green/src/side.rs`、`apps/green/src/keys.rs` 的 `toggle_outline`；`--capture` 只有静帧，必须另排一次真窗口/窗口测试：展开大纲、核对层级与折叠箭头、点击标题跳转 |
+
+每修好一条，把对应骨架加进 `fixtures/real/ci-positive.txt`，并从上面的待修表里移出；没通过就留在债里。
+白名单是唯一入口，生成骨架后仍要过 `python tools/redact.py --verify fixtures/real/skeletons`。
+本轮按边界不改 `.github/`，CI 接线由 CI 线读这份白名单。
+
 ### 还叫 ely-mark / ElyMark 的地方
 
 产品名与二进制已经是 Green：`AppId::Mark` 的 `name()` 是 `Green`、`slug()` 是 `green`、bundle id 是
