@@ -23,6 +23,19 @@
 
 - run `45808353158`（head `ffe922d`）的 `test` job 红**不是 `skips.sh` 假红**：第 6 步 `cargo test --workspace` 退出 101，`-p green-plugins --test process` 的 `the_shipped_log_plugin_speaks_the_same_contract_from_node` 在 `crates/green-plugins/tests/process.rs:154` 对 `Option<&[Block]>` 的 `.expect("blocks")` panic（该二进制 14 passed / 1 failed）；第 7 步 `scripts/skips.sh` 是 success，日志里没有 `SKIP:` 或 `GREEN_TYPST`。真因是插件测试失败，由另一条线修。
 - 历史记录：2026-11-26 的 main 上 `test-app` job（`cargo test -p green`）因两处测试代码错误红——`apps/green/src/output/tests.rs` 调用了不是 green dev-dependency 的 `ely_pdf_engine`，`apps/green/src/desk/tests.rs` 调用了不存在的 `Desk::tree_failed`；当时 S2 工作树已有修复。该 job 故意保持启用，关掉它只会让同类破坏无人发现。这只记当时的原因，当前状态以 CI 结果为准。
+## S2b 修复落地状态
+
+- 裸标识符 `nf / ne / n2` 不再被当成 Typst 的单个未知变量：`green-math`
+  把「任何裸 ASCII 字母数字串逐字符拆」写成契约并加真编译测试，提交 `fd87c3d`。
+  旧 main 的转换器才会在真实笔记里报 `unknown variable nf / ne / n2`。
+- 一条公式编译失败不再连坐整篇 PDF：`crates/green-export` 先进程内真编译
+  每条公式，转换或编译失败都降级为字面 TeX，再编译整篇，提交 `3258d54`。
+- U+200B 在写进 Typst 前从正文和公式源码两处剥掉（同一提交），PDF 文本层
+  不再残留不可见字符。
+- 真实笔记 6.2 / 6.4 / 6.5 现在能导出：降级 6 / 9 / 8 条公式，分别 13 / 14 / 8 页、
+  415 / 474 / 311 KB，其余公式正常排版。**降级不是通过**：这三份仍不进 CI 正样本，
+  等真实笔记那条线复验后再决定夹具。
+
 ## 已知债
 
 ### 组件库快照反向依赖 `green-math`
