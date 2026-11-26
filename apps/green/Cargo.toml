@@ -10,6 +10,10 @@ build = "../../packaging/windows/icon.rs"
 [build-dependencies]
 embed-resource.workspace = true
 
+[features]
+# Counts text shaping, for the folding measurement (S2).
+shape-count = ["gpui/shape-count"]
+
 [dependencies]
 dunce.workspace = true
 anyhow.workspace = true

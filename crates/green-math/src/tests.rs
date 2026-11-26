@@ -54,7 +54,7 @@ fn an_unknown_command_is_named_and_pointed_at() {
     let errors = latex_to_typst("a+\\mathbb{R}").expect_err("not whitelisted");
     assert_eq!(errors, [Unsupported { name: "mathbb".into(), at: 2 }]);
     let said = errors[0].to_string();
-    assert!(said.contains("\\mathbb") && said.contains("白名单"), "{said}");
+    assert!(said.contains("\\mathbb") && said.contains("whitelist"), "{said}");
 }
 
 #[test]

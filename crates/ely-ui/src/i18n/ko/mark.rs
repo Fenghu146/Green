@@ -2,6 +2,7 @@
 
 pub(super) const KO: &[(&str, &str)] = &[
     ("mark.pane.files", "파일"),
+    ("mark.math.unsupported", "\\{name}({at}번째 바이트)은 수식 허용 목록에 없습니다"),
     ("mark.tool.insert", "삽입"),
     ("mark.tool.more", "더 보기"),
     ("mark.pane.outline", "개요"),

@@ -36,7 +36,7 @@ target/debug/green.exe path/to/note.md
 
 ## 资产
 
-- 图标：`assets/icon.svg`（母版）与 `assets/icon-small.svg`（≤32 px 变体），用户提供的原创素材，随本仓库以 GPL-3.0-or-later 发布；`scripts/icon.py` 生成 `assets/icons/green.ico` 与 `green.png`。
+- 图标：`assets/icon.svg`（母版）与 `assets/icon-small.svg`（≤32 px 变体），用户提供的原创素材，随本仓库以 GPL-3.0-or-later 发布；`scripts/icon.py` 生成 `assets/icons/green.ico` 与 `green.png`；**图标产物已提交，构建不需要脚本**，只有改图时才重跑，且依赖本机 Chrome/Edge 栅格化。
 - 字体：Noto Sans CJK SC，SIL OFL 1.1，见 `LICENSES/OFL-1.1.txt`。
 - 组件库：`vendor/ely-gpui-components` 是 Ely-GPUI-Components（MIT）的 fork，声明见 `LICENSES/Ely-GPUI-Components-MIT.txt`。
 

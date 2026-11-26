@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Green's icon: the two glyphs rastered per size, then one .ico.
+"""Regenerate Green's icon files. Not a build step.
 
-    python scripts/icon.py
+Run this only when the artwork changes: `assets/icons/green.ico` and
+`green.png` are committed, so building and running Green needs neither this
+script nor Chrome. It rasters through a local Chrome or Edge (no other SVG
+renderer is assumed), so it fails on a machine without one — that is fine,
+because CI never runs it.
 
 The master draws at 48 px and up; 32 px and below get the small glyph (no main
 vein, a heavier stroke, the leaf larger), so nothing is a shrunken master.
-Needs Chrome or Edge for the raster; the .ico carries PNG images at each size.
+The .ico carries PNG images at each size.
 """
 
 import os

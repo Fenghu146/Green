@@ -228,6 +228,11 @@ impl Drop for MissingGlyphReceiver {
 }
 
 /// The GPUI text rendering sub system.
+/// Green: text shaping calls, for the folding test. Compiled in only with
+/// `shape-count`; release builds leave it out.
+#[cfg(feature = "shape-count")]
+pub static SHAPED_LINES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub struct TextSystem {
     platform_text_system: Arc<dyn PlatformTextSystem>,
     font_ids_by_font: RwLock<FxHashMap<Font, CachedFont>>,
@@ -669,6 +674,18 @@ impl WindowTextSystem {
     /// Note that this method can only shape a single line of text. It will panic
     /// if the text contains newlines. If you need to shape multiple lines of text,
     /// use [`Self::shape_text`] instead.
+    /// Green: lines shaped so far, when the `shape-count` feature is on.
+    #[cfg(feature = "shape-count")]
+    pub fn shaped_lines() -> usize {
+        SHAPED_LINES.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Green: start counting again.
+    #[cfg(feature = "shape-count")]
+    pub fn reset_shaped_lines() {
+        SHAPED_LINES.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn shape_line(
         &self,
         text: SharedString,
@@ -680,6 +697,8 @@ impl WindowTextSystem {
             text.find('\n').is_none(),
             "text argument should not contain newlines"
         );
+        #[cfg(feature = "shape-count")]
+        SHAPED_LINES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
         for run in runs {

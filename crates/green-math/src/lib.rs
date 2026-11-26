@@ -17,10 +17,11 @@ pub struct Unsupported {
 }
 
 impl fmt::Display for Unsupported {
+    /// For logs: the UI words this through `mark.math.unsupported`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "\\{}（第 {} 个字节）不在公式白名单里；把它加进 green-math 的 WHITELIST 就能渲染",
+            "\\{} at byte {} is not in the formula whitelist",
             self.name,
             self.at + 1
         )
