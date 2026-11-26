@@ -1,0 +1,142 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: build
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      # rust-toolchain.toml pins the channel and its components; the first
+      # cargo call installs them.
+      - run: rustup show active-toolchain
+      - run: cargo build -p green --locked
+
+  test:
+    name: test
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup show active-toolchain
+      # ely-lok as its own package: under the workspace's unified features three
+      # view::reveal tests need a LOK kernel and panic without ELY_LOK_DIR.
+      - run: cargo test -p ely-lok --locked
+      # ely-pdf-worker's build script refuses to run without libmupdf.lib, which
+      # scripts/build-mupdf.sh produces; no runner has that build, and no other
+      # package depends on it, so it is excluded rather than skipped silently.
+      #
+      # When green-math's conversion gets its real-typst test (the one that reads
+      # GREEN_TYPST and compiles the output), install the Typst CLI at the typst
+      # version in Cargo.toml here and export GREEN_TYPST — and make that test
+      # fail rather than skip when the variable is unset. As of 2026-11-26 no test
+      # reads GREEN_TYPST, so there is nothing to wire yet.
+      - run: cargo test --workspace --exclude ely-pdf-worker --exclude ely-lok --exclude green --locked
+
+  test-app:
+    name: test green
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup show active-toolchain
+      # Red on main as of 2026-11-26, for two errors in test code that the S2
+      # working tree already fixes: apps/green/src/output/tests.rs calls
+      # ely_pdf_engine (not a dev-dependency of green), and
+      # apps/green/src/desk/tests.rs calls Desk::tree_failed (no such method).
+      # Kept enabled on purpose: turning it off is how that breakage would go
+      # unnoticed. It goes green when S2 lands.
+      - run: cargo test -p green --locked
+
+  lint:
+    name: lint
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup show active-toolchain
+      # Warnings do not fail the job. Three are open: clippy::type_complexity in
+      # green-math's `cached` (the SEEN OnceLock type), and two missing-docs
+      # warnings inside the vendored gpui-pre copy. `-D warnings` goes here in
+      # the commit that clears them — a deny gate that trips on an old, unrelated
+      # warning teaches people to ignore the gate.
+      - shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --exclude ely-pdf-worker --lib --bins --locked \
+            --message-format short -- -W clippy::all 2>&1 | tee clippy.log
+          # Recorded every run so the count going down (and then reaching zero) is visible.
+          warnings=$(grep -c ': warning: ' clippy.log || true)
+          echo "clippy warnings: $warnings" >>"$GITHUB_STEP_SUMMARY"
+          grep ': warning: ' clippy.log >>"$GITHUB_STEP_SUMMARY" || true
+
+  tools:
+    name: tools
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup show active-toolchain
+      # Formatting is gated here and only here: tools/ is rustfmt-clean, while the
+      # product tree is not — 678 files differ at the pinned 1.9.0 with the 2024
+      # style edition — so a workspace-wide gate would be red for reasons that are
+      # not this workflow's to fix. Add `cargo fmt --all --check` in the commit
+      # that formats apps/ and crates/.
+      - run: cargo fmt --manifest-path tools/Cargo.toml --check
+      - run: cargo clippy --manifest-path tools/Cargo.toml --all-targets --locked -- -D warnings
+      - run: cargo test --manifest-path tools/Cargo.toml --locked
+      # The committed fixtures must be exactly what the generator writes.
+      - run: cargo run --manifest-path tools/Cargo.toml --bin fixtures --locked -- --check
+
+  licenses:
+    name: licenses
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.22.1
+      # Whitelist in deny.toml: AGPL fails by omission, MPL only for the crates
+      # named there. `-D unnecessary-skip` keeps the bans skip list honest.
+      - run: cargo deny check -D unnecessary-skip -D unmatched-skip
+
+  notices:
+    name: notices
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.8.2
+      - run: rustup show active-toolchain
+      - shell: bash
+        run: scripts/notices.sh
+      # THIRD-PARTY-NOTICES.txt is generated; a dependency change that skips it
+      # would ship notices that no longer match Cargo.lock.
+      - shell: bash
+        run: git diff --exit-code -- THIRD-PARTY-NOTICES.txt
