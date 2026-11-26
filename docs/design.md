@@ -107,6 +107,12 @@ S2 的证据（缺一项即未完成）：5 万字 K2P p50/p95/p99、>16 ms 占�
 | 图标/本地化/杂项 | ~2 MB |
 | 合计 | **~85–93 MB** |
 
+### 1.5 平台（v1 仅 Windows）
+
+v1 的目标平台只有 Windows 10/11 x64（用户定案，2026-11-26）。**非 Windows 目标的编译未验证**：开发机只装了 `x86_64-pc-windows-msvc` 的 std，`cargo check --target x86_64-unknown-linux-gnu` 停在 `can't find crate for core`，而 gpui 的 Linux 依赖（x11 / wayland / xkbcommon）在 Windows 上也装不起来；`--capture` 更是只接 DirectX 的离屏读回。所以 Linux / macOS 既没编过也没跑过，排进 `later.md`，不在 v1 范围。将来要做时先改这一节与 §1 的范围，再谈代码。
+
+已经能确认的只有一点：`ely-ui` 的 `capture` 特性里的 `gpui_windows/test-support` 在 Cargo 的 feature 解析阶段对其他目标不报错（它只在该目标有依赖时生效），`capture.rs` 内部没有任何 `#[cfg(windows)]` 分支。
+
 ## 2. 许可
 
 **GPL-3.0-or-later**（gpui 经 `vendor/gpui-pre` 打补丁，事实形态）。硬约束：**不引入 AGPL**、**不引入无力履行义务的 MPL**。

@@ -19,3 +19,8 @@
 ## 插件
 
 - 列表项、alert 正文、表格单元格内嵌 Block。v1 的 Block 契约把它们定成字符串；要做就是 `apiVersion += 1`，并按约定保留 v1 两个小版本。
+
+## 平台
+
+- Linux / macOS 目标。v1 只做 Windows（`docs/design.md` §1.5），非 Windows 的编译与运行都没验过；`--capture` 只接 DirectX 的离屏读回。要做先改 §1.5 的范围。
+- `ely-platform/src/diagnostics.rs:47` 仍把 `AppId::Pdf` 映射到 `"ely-pdf-worker"`，而 `ely-pdf-engine` / `ely-pdf-worker` 都已移出 workspace。它现在只是日志里的一个字符串，不影响行为；删 Pdf app 时一并去掉。
