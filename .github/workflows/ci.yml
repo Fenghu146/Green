@@ -48,6 +48,12 @@ jobs:
       # cargo call installs them.
       - run: rustup show active-toolchain
       - run: cargo build -p green --locked
+      # The real-note fixture job uses this exact binary; no second build.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: green-for-fixtures
+          path: target/debug/green.exe
+          retention-days: 1
 
   test:
     name: test
@@ -121,17 +127,13 @@ jobs:
       - name: skips.sh self-test
         shell: bash
         run: scripts/skips-self-test.sh
-      # Real notes, but only the ones that pass: ci-positive.txt is the
-      # whitelist. This reuses the Typst installed above and the binary built
-      # from this checkout; every failure prints the skeleton and the check.
-      - name: Real note CI fixtures
-        shell: bash
-        env:
-          REAL_FIXTURE_WORK: ${{ runner.temp }}/real-fixtures
-        run: |
-          set -euo pipefail
-          cargo build -p green --locked
-          python tools/check_real_fixtures.py --green target/debug/green.exe --out "$REAL_FIXTURE_WORK"
+      # The fixture job runs separately so this job stays under the time
+      # budget; it reuses this Typst and the green.exe built by the build job.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: typst-for-fixtures
+          path: ${{ env.GREEN_TYPST }}
+          retention-days: 1
 
   test-app:
     name: test green
@@ -152,6 +154,34 @@ jobs:
       - if: always()
         shell: bash
         run: scripts/skips.sh tests.log
+
+  # Real notes, but only the ones that pass: ci-positive.txt is the whitelist.
+  # This waits for the build and test jobs, then reuses their green.exe and
+  # Typst; a cold path stays inside the three-minute job budget.
+  real-fixtures:
+    name: real note fixtures
+    needs: [build, test]
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: green-for-fixtures
+          path: ${{ runner.temp }}/fixture-bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: typst-for-fixtures
+          path: ${{ runner.temp }}/fixture-typst
+      - name: Export and audit the passing skeletons
+        shell: bash
+        env:
+          GREEN_TYPST: ${{ runner.temp }}/fixture-typst/typst.exe
+          FIXTURE_GREEN: ${{ runner.temp }}/fixture-bin/green.exe
+          REAL_FIXTURE_WORK: ${{ runner.temp }}/real-fixtures
+        run: |
+          set -euo pipefail
+          python tools/check_real_fixtures.py --green "$FIXTURE_GREEN" --out "$REAL_FIXTURE_WORK"
 
   lint:
     name: lint
