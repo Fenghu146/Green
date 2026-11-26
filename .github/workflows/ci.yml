@@ -67,11 +67,11 @@ jobs:
       # scripts/build-mupdf.sh produces; no runner has that build, and no other
       # package depends on it, so it is excluded rather than skipped silently.
       #
-      # When green-math's conversion gets its real-typst test (the one that reads
-      # GREEN_TYPST and compiles the output), install the Typst CLI at the typst
-      # version in Cargo.toml here and export GREEN_TYPST — the skips step below
-      # fails the job until then, on purpose. As of 2026-11-26 no test reads
-      # GREEN_TYPST, so there is nothing to wire yet.
+      # green-math's real-Typst test and green-export's end-to-end test read
+      # GREEN_TYPST and return early when it is unset. Their eprintln text is
+      # not a SKIP: line, so the skips step below does not fail on it. Whether
+      # to install Typst here is a decision tracked in STATUS.md, not a state
+      # this comment should claim.
       - shell: bash
         run: |
           set -o pipefail
