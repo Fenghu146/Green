@@ -1,14 +1,14 @@
 //! Views kept by what they were made from: the file's path, mtime and size,
-//! and the plugin's version (design §3).
+//! and the plugin's version and file fingerprint (design §3).
 
-use std::{
-    path::{Path, PathBuf},
-    time::UNIX_EPOCH,
-};
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::{blocks::Block, manifest::Plugin};
+use crate::{
+    blocks::Block,
+    manifest::{Fingerprint, Plugin, stamp},
+};
 
 /// How many views stay in memory.
 pub(crate) const KEPT: usize = 32;
@@ -21,23 +21,20 @@ pub(crate) struct Key {
     size: u64,
     plugin: String,
     version: String,
+    fingerprint: Fingerprint,
 }
 
 impl Key {
     /// The key of `path` as `plugin` sees it now.
     pub fn new(path: &Path, plugin: &Plugin) -> Option<Key> {
-        let meta = std::fs::metadata(path).ok()?;
-        let modified = meta
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|since| since.as_nanos());
+        let (modified, size) = stamp(path)?;
         Some(Key {
             path: path.to_path_buf(),
             modified,
-            size: meta.len(),
+            size,
             plugin: plugin.manifest.id.clone(),
             version: plugin.manifest.version.clone(),
+            fingerprint: plugin.fingerprint.clone(),
         })
     }
 }
@@ -80,6 +77,11 @@ impl Cache {
         self.entries.truncate(self.kept);
     }
 
+    /// Drops every view `plugin` made; a changed script makes them stale.
+    pub fn forget(&mut self, plugin: &str) {
+        self.entries.retain(|(key, _)| key.plugin != plugin);
+    }
+
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -105,6 +107,7 @@ mod tests {
                 enabled: true,
                 capabilities: vec!["blocks@1".into()],
             },
+            fingerprint: Fingerprint::default(),
         }
     }
 

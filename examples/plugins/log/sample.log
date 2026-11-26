@@ -1,5 +1,5 @@
 2026-11-26T06:53:45.418Z INFO  Green 0.1.17 started
 2026-11-26T06:53:47.383Z WARN  plugin slow ran past its time
 2026-11-26T06:53:51.901Z ERROR the CSV plugin did not answer
-2026-11-26T06:53:52.010Z INFO  opened data.csv as tab 1
+2026-11-26T06:53:52.010Z INFO  opened data.csv as *tab* 1
 plain line with no level or time

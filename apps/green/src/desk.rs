@@ -169,7 +169,7 @@ pub(crate) fn open_in(
     let fail = |error: String| -> ! { startup::fail(app, &error) };
     let work = ely_office::fresh_work(&data).unwrap_or_else(|error| fail(format!("{error}")));
     crate::keys::bind(cx);
-    crate::plugins::start(&data, cx);
+    let skipped = crate::plugins::start(&data, cx);
     let recent_file = data.join("recent.json");
     let look_file = data.join("look.json");
     // An unreadable look is reported; the default shows.
@@ -275,6 +275,17 @@ pub(crate) fn open_in(
             log::error!("mark: the recent list did not read: {error}");
             let said = text(cx, "office.error.engine", &[("error", &error.to_string())]);
             desk.toast(said, ely_gpui_component::primitives::Severity::Danger, cx);
+        }
+        for problem in skipped {
+            let said = text(
+                cx,
+                "office.error.engine",
+                &[(
+                    "error",
+                    &format!("{}: {}", problem.dir.display(), problem.why),
+                )],
+            );
+            desk.toast(said, ely_gpui_component::primitives::Severity::Warning, cx);
         }
         // Back in front: the folder may have changed.
         cx.observe_window_activation(window, |desk, window, cx| {

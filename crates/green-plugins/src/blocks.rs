@@ -378,9 +378,12 @@ fn quoted(markdown: &str) -> String {
 
 fn table(aligns: &[Align], head: &[String], rows: &[Vec<String>]) -> String {
     let columns = head.len();
-    let cell = |text: &str| text.replace('|', "\\|").replace(['\n', '\r'], "<br>");
     let row = |cells: &[String]| {
-        let mut cells: Vec<String> = cells.iter().take(columns).map(|text| cell(text)).collect();
+        let mut cells: Vec<String> = cells
+            .iter()
+            .take(columns)
+            .map(|text| cell_text(text))
+            .collect();
         cells.resize(columns, String::new());
         format!("| {} |", cells.join(" | "))
     };
@@ -392,6 +395,38 @@ fn table(aligns: &[Align], head: &[String], rows: &[Vec<String>]) -> String {
     lines.push(format!("| {} |", markers.join(" | ")));
     lines.extend(rows.iter().map(|cells| row(cells)));
     lines.join("\n")
+}
+
+/// A table cell: a pipe the plugin left unescaped, and every line break.
+fn cell_text(text: &str) -> String {
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    let mut out = String::with_capacity(text.len());
+    let mut slashes = 0;
+    for ch in text.chars() {
+        match ch {
+            '\\' => {
+                slashes += 1;
+                out.push('\\');
+            }
+            '|' => {
+                // A pipe the plugin escaped itself stays as it is.
+                if slashes % 2 == 0 {
+                    out.push('\\');
+                }
+                out.push('|');
+                slashes = 0;
+            }
+            '\n' => {
+                out.push_str("<br>");
+                slashes = 0;
+            }
+            _ => {
+                out.push(ch);
+                slashes = 0;
+            }
+        }
+    }
+    out
 }
 
 /// A fence longer than any run of backticks in `text`.
@@ -516,6 +551,19 @@ mod tests {
         assert_eq!(
             to_markdown(&blocks),
             "| name | qty |\n| :--- | ---: |\n| a\\|b | 3 |\n| line<br>break |  |\n\nAfter.\n"
+        );
+    }
+
+    #[test]
+    fn a_cell_escapes_its_pipe_once_and_keeps_the_plugins_own() {
+        let blocks = [Block::Table {
+            aligns: vec![],
+            head: vec!["a\\|b".into(), "c|d".into()],
+            rows: vec![vec!["line\r\nbreak".into(), "x\\\\|y".into()]],
+        }];
+        assert_eq!(
+            to_markdown(&blocks),
+            "| a\\|b | c\\|d |\n| --- | --- |\n| line<br>break | x\\\\\\|y |\n"
         );
     }
 

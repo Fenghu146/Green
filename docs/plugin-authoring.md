@@ -14,7 +14,9 @@ Green 的数据目录下的 `plugins/<id>/`：
 | macOS | `~/Library/Application Support/Green/green/plugins/` |
 | Linux | `~/.local/share/Green/green/plugins/` |
 
-数据目录在设置里搬过就跟着走。每个插件一个文件夹，里面至少 `manifest.json` 和它要跑的文件。Green **启动时**读一遍：加、删、改插件后重启 Green 生效，不需要重编译。
+数据目录在设置里搬过就跟着走。每个插件一个文件夹，里面至少 `manifest.json` 和它要跑的文件。
+
+Green 启动时读一遍插件文件夹：**新增或删除一个插件文件夹**要重启 Green；**改已加载插件的脚本或清单**不用——下次打开那个后缀的文件时，Green 比对文件指纹，变了就重读清单、清掉该插件的缓存再跑。都不需要重编译。
 
 ## 一次运行
 
@@ -40,7 +42,7 @@ Green 的数据目录下的 `plugins/<id>/`：
 | `contentOmitted` | 布尔 | `true` 表示 `content` 是 `null`，插件自己按 `path` 读 |
 | `capabilities` | 字符串数组 | 宿主支持的能力，目前只有 `blocks@1` |
 
-文件超过 8 MiB（8 × 1024 × 1024 字节）时不发字节，只发路径。
+文件超过 8 MiB（8 × 1024 × 1024 字节）时不发字节，只发路径：`content` 是 `null`，`contentOmitted` 是 `true`。两个字段总是同时出现；插件解析时**两种都容忍**（`null` 与整个字段缺失），这样以后哪边改都不会互炸。
 
 ### 插件 → Green：stdout 一个 JSON，退出码 0
 
@@ -87,6 +89,8 @@ Node 默认就是 UTF-8。
 | `rule` | — | 分隔线 |
 | `alert` | `level`（`note`/`tip`/`important`/`warning`/`caution`）、`text` | GitHub 提示块 |
 
+字段以这一版为准（`docs/design.md` §3 的 v1 契约）。边界：list item、alert 的 `text`、table cell 都是**字符串，不能嵌块**；要嵌块是 `apiVersion += 1`。
+
 ```json
 { "kind": "heading", "level": 2, "text": "本月的表" }
 { "kind": "list", "ordered": true, "start": 1, "items": ["第一项", "第二项"] }
@@ -97,7 +101,11 @@ Node 默认就是 UTF-8。
 { "kind": "alert", "level": "warning", "text": "有 1 行是错误" }
 ```
 
-文本字段（`text`、标题、列表项、`alert` 的文字、表格单元格）按**行内 Markdown** 渲染，所以插件可以用 `**粗**`、`` `代码` ``、`[链接](…)`。数据型插件要让 `*`、`_`、`[` 这些字符字面显示，得自己转义；随包的 CSV/LOG 示例为了短，直接透传。表格单元格里的 `|` 由 Green 转义，换行变成 `<br>`。
+> **文本字段按行内 Markdown 解析，插件必须转义字面字符。** 不转义时 `*`、`_`、`[`、`` ` ``、`<` 会被当成样式或 HTML。
+
+文本字段（`text`、标题、列表项、`alert` 的文字、表格单元格）按**行内 Markdown** 渲染，所以插件也可以用 `**粗**`、`` `代码` ``、`[链接](…)`。数据型插件要让字面字符原样显示，得自己转义：先转义 `\`，再给 `` ` ``、`*`、`_`、`[`、`]`、`<`、`>`、`|` 加反斜杠，换行换成 `<br>`——`examples/plugins/` 的三个示例都有 `literal()` 可抄。
+
+表格单元格的 `|` 和换行宿主会兜底（没转义的 `|` 补反斜杠、换行变 `<br>`）；插件自己转义过也安全，宿主不重复转义。
 
 不认识的 `kind` **整块丢弃**；已知 `kind` 里缺字段或类型不对的那一块也丢弃（日志里记一条），不会让整次打开失败。未知字段一律忽略。
 
@@ -125,9 +133,11 @@ Node 默认就是 UTF-8。
 | `apiVersion` | 是 | — | 整数，这一版只认 `1` |
 | `extensions` | 是 | — | 至少一个；`csv` 和 `.csv` 等价，统一成小写带点 |
 | `command` | 是 | — | 非空数组；第一项是可执行文件（走 `PATH`），其余是参数；工作目录是插件自己的文件夹 |
-| `timeoutMs` | 否 | `3000` | 一次运行的上限，允许 `50`–`600000` |
+| `timeoutMs` | 否 | `3000` | 一次运行的上限，允许 `50`–`30000`；超过上限的清单被拒绝加载 |
 | `enabled` | 否 | `true` | `false` 时仍加载，但永不选中 |
 | `capabilities` | 否 | `["blocks@1"]` | 声明会产出的能力 |
+
+`timeoutMs` 从 spawn 算到进程退出：Node/Python 冷启动常吃 200–500 ms，给足余量。默认 3000，上限 30000，超了拒绝加载。
 
 规则：
 
@@ -135,7 +145,7 @@ Node 默认就是 UTF-8。
 - 未知字段忽略；以后新增的字段一定是可选的、有默认值。
 - 同一个 `id` 出现在两个文件夹：按文件夹名排序，后面的跳过并记日志。
 - 同一个后缀被两个插件声明：按 `id` 排序，第一个生效，后一个记日志。
-- 没有 `manifest.json`、JSON 语法错、`apiVersion` 超范围、`extensions` 为空、`command` 为空、`timeoutMs` 越界：这个文件夹被跳过并记日志，**不影响启动**。
+- 没有 `manifest.json`、JSON 语法错、`apiVersion` 超范围、`extensions` 为空、`command` 为空、`timeoutMs` 越界：这个文件夹被跳过，启动时记日志并在状态区提示，**不影响启动**。
 
 ## 兼容性
 
@@ -150,18 +160,20 @@ Node 默认就是 UTF-8。
 
 | 情况 | Green 做什么 |
 | --- | --- |
-| 超时（`timeoutMs`） | 杀掉进程，文件按文本打开 |
+| 超时（`timeoutMs`，含进程启动） | 杀掉进程，文件按文本打开 |
 | 非零退出 | 文件按文本打开；原因带退出码和 stderr 末尾 |
 | stdout 不是合法 JSON，或 `apiVersion` 不对 | 同上 |
 | 可执行文件找不到 | 同上 |
-| 清单坏 | 启动时记一条 skip 日志，插件不参与；不影响启动 |
+| 清单坏 | 启动时记一条 skip 日志并在状态区提示，插件不参与；不影响启动 |
 | 没有插件认领这个后缀 | 按普通文本打开，不提示（没有出错） |
 
-## 缓存
+## 缓存与热更新
 
-同一份文件、同一个插件版本，第二次打开不再跑进程。键是（规范化路径、mtime、大小、插件 `id`、插件 `version`）。内存里最多留 32 个视图，Green 退出即清空；失败不缓存。
+键是（规范化路径、mtime、大小、插件 `id`、插件 `version`、`command` 指到的文件指纹）。**打开文件时**比对指纹：脚本或清单变了，就重读清单、清掉该插件的缓存，再跑一次——不用重启 Green，也不用改 `version`。
 
-改了脚本但没改 `version`，同一个文件在本次运行里还会拿旧结果——改版本号或重启 Green。
+同一份文件、同一份脚本、同一个版本：第二次打开不再跑进程。内存里最多留 32 个视图，Green 退出即清空；失败不缓存。
+
+`command` 里能在插件文件夹内（或按绝对路径）找到的文件都进指纹；`python`、`node` 这种从 `PATH` 找的程序不算——换解释器不是换插件。
 
 ## 两个语言，同一个契约
 
@@ -182,7 +194,7 @@ mark: app.log opens through plugin log: 3 block(s)
 1. 在 `<数据目录>/plugins/` 下建 `<id>/`。
 2. 写 `manifest.json`：`extensions` 指向新后缀，`command` 指向你的程序。
 3. 写程序：读 stdin 的 JSON，把 Block 写到 stdout。
-4. 重启 Green，打开那个后缀的文件。
+4. 重启 Green（新文件夹只在启动时发现），打开那个后缀的文件。
 
 不需要改 Green、不需要重编译、不需要发版。实测：`examples/plugins/tsv/` 只加 3 个文件（清单、脚本、README），同一个已编译的 exe 直接打开 `data.tsv`；那次提交里没有任何 `crates/` 或 `apps/` 文件。
 

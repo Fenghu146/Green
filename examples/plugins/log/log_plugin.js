@@ -4,6 +4,14 @@
 
 const fs = require("node:fs");
 
+// A cell's text as Markdown shows it, not as Markdown means it.
+function literal(text) {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/[`*_\[\]<>|]/g, (mark) => `\\${mark}`)
+    .replace(/\r\n|\r|\n/g, "<br>");
+}
+
 function main() {
   const request = JSON.parse(fs.readFileSync(0, "utf8"));
   if (request.apiVersion !== 1) {
@@ -11,10 +19,11 @@ function main() {
     return 2;
   }
 
-  // Over 8 MB the host sends the path and no bytes.
-  const bytes = request.content === null
+  // Over 8 MB the host sends the path and no bytes; a missing field means the same.
+  const content = request.content ?? null;
+  const bytes = content === null
     ? fs.readFileSync(request.path)
-    : Buffer.from(request.content, "base64");
+    : Buffer.from(content, "base64");
   const text = bytes.toString("utf8").replace(/^\uFEFF/, "");
 
   const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
@@ -24,7 +33,7 @@ function main() {
   for (const line of lines) {
     const found = line.match(pattern);
     if (found) {
-      rows.push([found[1], found[2].toUpperCase(), found[3]]);
+      rows.push([literal(found[1]), literal(found[2].toUpperCase()), literal(found[3])]);
     } else {
       other.push(line);
     }

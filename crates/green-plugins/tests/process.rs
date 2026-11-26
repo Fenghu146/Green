@@ -51,6 +51,19 @@ fn manifest(python: &str, id: &str, extension: &str, timeout_ms: u64) -> String 
     )
 }
 
+/// The shipped CSV plugin, copied into `root/csv` and run by `python`.
+fn shipped_csv(root: &Path, python: &str) {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/csv");
+    let folder = root.join("csv");
+    std::fs::create_dir_all(&folder).expect("a folder");
+    std::fs::copy(source.join("csv_plugin.py"), folder.join("run.py")).expect("the script");
+    std::fs::write(
+        folder.join("manifest.json"),
+        manifest(python, "csv", ".csv", 5_000),
+    )
+    .expect("a manifest");
+}
+
 #[test]
 fn the_shipped_csv_plugin_opens_a_csv_as_a_table() {
     let Some(python) = python() else {
@@ -58,15 +71,7 @@ fn the_shipped_csv_plugin_opens_a_csv_as_a_table() {
         return;
     };
     let root = tempfile::tempdir().expect("a temp dir");
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/csv");
-    let folder = root.path().join("csv");
-    std::fs::create_dir_all(&folder).expect("a folder");
-    std::fs::copy(source.join("csv_plugin.py"), folder.join("run.py")).expect("the script");
-    std::fs::write(
-        folder.join("manifest.json"),
-        manifest(&python, "csv", ".csv", 5_000),
-    )
-    .expect("a manifest");
+    shipped_csv(root.path(), &python);
     let host = Host::load(root.path());
 
     let files = tempfile::tempdir().expect("a temp dir");
@@ -93,6 +98,29 @@ fn the_shipped_csv_plugin_opens_a_csv_as_a_table() {
     assert_eq!(
         view.markdown().expect("Markdown"),
         "| name | qty |\n| --- | --- |\n| apple | 3 |\n| pear | 5 |\n"
+    );
+}
+
+#[test]
+fn a_csv_cell_shows_its_markdown_marks_literally() {
+    let Some(python) = python() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+    let root = tempfile::tempdir().expect("a temp dir");
+    shipped_csv(root.path(), &python);
+    let host = Host::load(root.path());
+
+    let files = tempfile::tempdir().expect("a temp dir");
+    let csv = files.path().join("marks.csv");
+    std::fs::write(&csv, "a|b\n*c*_d_`e`<f>\n").expect("a csv");
+    assert_eq!(
+        host.open(&csv).blocks().expect("blocks"),
+        [Block::Table {
+            aligns: vec![],
+            head: vec!["a\\|b".into()],
+            rows: vec![vec!["\\*c\\*\\_d\\_\\`e\\`\\<f\\>".into()]],
+        }]
     );
 }
 
@@ -151,7 +179,7 @@ fn the_shipped_log_plugin_speaks_the_same_contract_from_node() {
                     vec![
                         "2026-11-26T06:53:52.010Z".into(),
                         "INFO".into(),
-                        "opened data.csv as tab 1".into()
+                        "opened data.csv as \\*tab\\* 1".into()
                     ],
                 ],
             },
@@ -415,6 +443,130 @@ print(json.dumps({"apiVersion": 1, "blocks": [{"kind": "paragraph", "text": "pat
         view.blocks().expect("blocks"),
         [Block::Paragraph("path only".into())]
     );
+}
+
+#[test]
+fn a_changed_script_shows_without_a_new_host() {
+    let Some(python) = python() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+    let root = tempfile::tempdir().expect("a temp dir");
+    let script = |version: &str| {
+        format!(
+            r#"
+import json, sys
+with open("runs.txt", "a", encoding="utf-8") as log:
+    log.write("run\n")
+print(json.dumps({{"apiVersion": 1, "blocks": [{{"kind": "paragraph", "text": "{version}"}}]}}))
+"#
+        )
+    };
+    let folder = plugin(
+        root.path(),
+        "echo",
+        &script("v1"),
+        &manifest(&python, "echo", ".echo", 5_000),
+    );
+    let host = Host::load(root.path());
+    let file = root.path().join("a.echo");
+    std::fs::write(&file, "x").expect("a file");
+
+    let first = host.open(&file);
+    assert_eq!(
+        first.blocks().expect("blocks"),
+        [Block::Paragraph("v1".into())]
+    );
+    assert!(matches!(first, View::Blocks { cached: false, .. }));
+
+    // The plugin's script changes; the host does not.
+    std::thread::sleep(Duration::from_millis(30));
+    std::fs::write(folder.join("run.py"), script("v2")).expect("a script");
+    let began = Instant::now();
+    let second = host.open(&file);
+    let spent = began.elapsed();
+    assert_eq!(
+        second.blocks().expect("blocks"),
+        [Block::Paragraph("v2".into())]
+    );
+    assert!(
+        matches!(second, View::Blocks { cached: false, .. }),
+        "the old view came back"
+    );
+    eprintln!("reopen after a script change took {spent:?}");
+    let runs = std::fs::read_to_string(folder.join("runs.txt")).expect("the log");
+    assert_eq!(runs.lines().count(), 2, "it ran again");
+}
+
+#[test]
+fn a_changed_manifest_version_runs_again() {
+    let Some(python) = python() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+    let root = tempfile::tempdir().expect("a temp dir");
+    let script = r#"
+import json, sys
+with open("runs.txt", "a", encoding="utf-8") as log:
+    log.write("run\n")
+print(json.dumps({"apiVersion": 1, "blocks": [{"kind": "paragraph", "text": "same"}]}))
+"#;
+    let manifest = |version: &str| {
+        format!(
+            r#"{{"id": "again", "version": "{version}", "apiVersion": 1,
+                "extensions": [".again"], "command": ["{python}", "run.py"]}}"#
+        )
+    };
+    let folder = plugin(root.path(), "again", script, &manifest("0.1.0"));
+    let host = Host::load(root.path());
+    let file = root.path().join("a.again");
+    std::fs::write(&file, "x").expect("a file");
+
+    assert!(matches!(
+        host.open(&file),
+        View::Blocks { cached: false, .. }
+    ));
+    assert!(
+        matches!(host.open(&file), View::Blocks { cached: true, .. }),
+        "the second open is cached"
+    );
+
+    std::thread::sleep(Duration::from_millis(30));
+    std::fs::write(folder.join("manifest.json"), manifest("0.2.0")).expect("a manifest");
+    assert!(
+        matches!(host.open(&file), View::Blocks { cached: false, .. }),
+        "a new version is a new view"
+    );
+    let runs = std::fs::read_to_string(folder.join("runs.txt")).expect("the log");
+    assert_eq!(runs.lines().count(), 2);
+}
+
+#[test]
+fn a_manifest_that_breaks_after_loading_falls_back() {
+    let Some(python) = python() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+    let root = tempfile::tempdir().expect("a temp dir");
+    let folder = plugin(
+        root.path(),
+        "later",
+        "print('{\"apiVersion\": 1, \"blocks\": []}')\n",
+        &manifest(&python, "later", ".later", 5_000),
+    );
+    let host = Host::load(root.path());
+    let file = root.path().join("a.later");
+    std::fs::write(&file, "x").expect("a file");
+    assert!(matches!(host.open(&file), View::Blocks { .. }));
+
+    std::thread::sleep(Duration::from_millis(30));
+    std::fs::write(folder.join("manifest.json"), "{").expect("a manifest");
+    assert!(matches!(
+        host.open(&file),
+        View::Plain {
+            reason: Reason::Manifest(_)
+        }
+    ));
 }
 
 #[test]

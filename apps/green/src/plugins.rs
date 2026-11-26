@@ -5,12 +5,13 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
 use ely_gpui_component::primitives::Severity;
 use ely_office::{Opening as _, Tabs as _, files};
 use gpui::{App, Context, Global};
-use green_plugins::{Host, View};
+use green_plugins::{Host, Problem, View};
 
 use crate::desk::Desk;
 
@@ -19,10 +20,12 @@ struct Plugins(Arc<Host>);
 
 impl Global for Plugins {}
 
-/// Reads `data/plugins`; a bad manifest is a log line, never a startup failure.
-pub(crate) fn start(data: &Path, cx: &mut App) {
+/// Reads `data/plugins`; a bad manifest is a log line and a status message,
+/// never a startup failure.
+pub(crate) fn start(data: &Path, cx: &mut App) -> Vec<Problem> {
     let host = Host::load(data.join("plugins"));
-    for problem in host.problems() {
+    let problems = host.problems();
+    for problem in &problems {
         log::warn!(
             "mark: plugin {} is skipped: {}",
             problem.dir.display(),
@@ -35,6 +38,7 @@ pub(crate) fn start(data: &Path, cx: &mut App) {
         host.dir().display()
     );
     cx.set_global(Plugins(Arc::new(host)));
+    problems
 }
 
 /// Takes `path` when a plugin reads it; `false` leaves it to the app.
@@ -62,6 +66,7 @@ pub(crate) fn intercept(path: &Path, cx: &mut Context<Desk>) -> bool {
         return false;
     }
     let asked = path.to_path_buf();
+    let began = Instant::now();
     log::info!("mark: {} is a plugin's", asked.display());
     cx.spawn(async move |desk, cx| {
         let reading = asked.clone();
@@ -69,7 +74,7 @@ pub(crate) fn intercept(path: &Path, cx: &mut Context<Desk>) -> bool {
             .background_executor()
             .spawn(async move { host.open(&reading) })
             .await;
-        desk.update(cx, |desk, cx| desk.plugin_opened(asked, opened, cx))
+        desk.update(cx, |desk, cx| desk.plugin_opened(asked, opened, began, cx))
             .ok();
     })
     .detach();
@@ -78,8 +83,9 @@ pub(crate) fn intercept(path: &Path, cx: &mut Context<Desk>) -> bool {
 
 impl Desk {
     /// A plugin's answer: its blocks as a document, or the file as text.
-    fn plugin_opened(&mut self, path: PathBuf, view: View, cx: &mut Context<Self>) {
+    fn plugin_opened(&mut self, path: PathBuf, view: View, began: Instant, cx: &mut Context<Self>) {
         let name = files::file_name(&path);
+        let took = began.elapsed().as_secs_f64() * 1_000.0;
         match view {
             View::Blocks {
                 plugin,
@@ -90,7 +96,7 @@ impl Desk {
                 let markdown = green_plugins::to_markdown(&blocks);
                 let cached = if cached { ", cached" } else { "" };
                 log::info!(
-                    "mark: {name} opens through plugin {plugin}: {} block(s){cached}",
+                    "mark: {name} opens through plugin {plugin}: {} block(s){cached} in {took:.1} ms",
                     blocks.len()
                 );
                 self.import_text(&name, Arc::new(markdown.into_bytes()), (), cx);
@@ -151,14 +157,14 @@ mod tests {
         )
     }
 
-    /// The first tab's text, once a load lands.
-    fn text(desk: &Entity<Desk>, cx: &mut VisualTestContext) -> String {
+    /// Tab `at`'s text, once its load lands.
+    fn tab_text(desk: &Entity<Desk>, at: usize, cx: &mut VisualTestContext) -> String {
         for _ in 0..300 {
             cx.run_until_parked();
             let found = desk.read_with(cx, |desk, _| {
                 desk.core
                     .tabs
-                    .first()
+                    .get(at)
                     .map(|tab| tab.doc.lock().expect("the text").current.clone())
             });
             if let Some(text) = found {
@@ -166,7 +172,11 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        panic!("no tab opened");
+        panic!("no tab {at}");
+    }
+
+    fn text(desk: &Entity<Desk>, cx: &mut VisualTestContext) -> String {
+        tab_text(desk, 0, cx)
     }
 
     fn toasts(desk: &Entity<Desk>, cx: &mut VisualTestContext) -> Vec<String> {
@@ -211,6 +221,40 @@ mod tests {
             "the tab keeps the file's name"
         );
         assert!(toasts(&desk, cx).is_empty());
+    }
+
+    #[gpui::test]
+    fn a_changed_script_shows_without_restarting(cx: &mut TestAppContext) {
+        let Some(python) = python() else {
+            eprintln!("skipping: no python on PATH");
+            return;
+        };
+        let data = tempfile::tempdir().expect("data");
+        let folder = install(
+            data.path(),
+            "echo",
+            &manifest(&python, "echo", ".echo", 5_000),
+            None,
+        );
+        let script = |version: &str| {
+            format!(
+                "import json\nprint(json.dumps({{\"apiVersion\": 1, \"blocks\": [{{\"kind\": \"paragraph\", \"text\": \"{version}\"}}]}}))\n"
+            )
+        };
+        fs::write(folder.join("run.py"), script("v1")).expect("a script");
+        let files = tempfile::tempdir().expect("files");
+        let file = files.path().join("a.echo");
+        fs::write(&file, "x").expect("a file");
+
+        let (desk, cx) = start(cx, data.path());
+        open(&desk, &file, cx);
+        assert_eq!(text(&desk, cx), "v1\n");
+
+        // The script changes; Green stays up.
+        std::thread::sleep(Duration::from_millis(30));
+        fs::write(folder.join("run.py"), script("v2")).expect("a script");
+        open(&desk, &file, cx);
+        assert_eq!(tab_text(&desk, 1, cx), "v2\n");
     }
 
     #[gpui::test]
@@ -292,6 +336,12 @@ mod tests {
             desk.read_with(cx, |desk, _| desk.core.tabs.len()),
             1,
             "one tab, none from the bad manifests"
+        );
+        assert_eq!(
+            toasts(&desk, cx).len(),
+            3,
+            "each skipped plugin says so: {:?}",
+            toasts(&desk, cx)
         );
     }
 }

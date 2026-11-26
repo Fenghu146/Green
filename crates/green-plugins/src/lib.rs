@@ -32,7 +32,7 @@ pub const CONTENT_LIMIT: u64 = 8 * 1024 * 1024;
 /// The plugin folders, and the views they made lately.
 pub struct Host {
     dir: PathBuf,
-    registry: manifest::Registry,
+    registry: Mutex<manifest::Registry>,
     cache: Mutex<Cache>,
 }
 
@@ -43,7 +43,7 @@ impl Host {
         let registry = manifest::Registry::load(&dir);
         Host {
             dir,
-            registry,
+            registry: Mutex::new(registry),
             cache: Mutex::new(Cache::new(cache::KEPT)),
         }
     }
@@ -54,45 +54,71 @@ impl Host {
     }
 
     /// Every plugin that loaded, switched on or not.
-    pub fn plugins(&self) -> &[Plugin] {
-        self.registry.plugins()
+    pub fn plugins(&self) -> Vec<Plugin> {
+        self.registry().plugins().to_vec()
     }
 
     /// Every folder skipped, and why.
-    pub fn problems(&self) -> &[Problem] {
-        self.registry.problems()
+    pub fn problems(&self) -> Vec<Problem> {
+        self.registry().problems().to_vec()
     }
 
     /// Whether an enabled plugin with this build's capability reads `path`.
     pub fn serves(&self, path: &Path) -> bool {
-        self.ready(path).is_some()
+        self.registry()
+            .find(&extension_of(path))
+            .is_some_and(|plugin| plugin.manifest.enabled && plugin.manifest.speaks_blocks())
     }
 
-    fn ready(&self, path: &Path) -> Option<&Plugin> {
-        let plugin = self.registry.find(&extension_of(path))?;
-        (plugin.manifest.enabled && plugin.manifest.speaks_blocks()).then_some(plugin)
+    /// The plugin that reads `extension`, read again if its files changed.
+    fn ready(&self, extension: &str) -> Result<Plugin, Reason> {
+        let mut registry = self.registry();
+        let Some(found) = registry.find(extension).cloned() else {
+            return Err(Reason::NoPlugin(extension.to_string()));
+        };
+        let plugin = if found.fingerprint.current() {
+            found
+        } else {
+            // A changed script or manifest is picked up here, not at launch.
+            let began = std::time::Instant::now();
+            let reloaded = registry.reload(&found.dir);
+            self.cache().forget(&found.manifest.id);
+            match &reloaded {
+                Ok(()) => log::info!(
+                    "plugins: {} changed; reloaded in {} µs",
+                    found.manifest.id,
+                    began.elapsed().as_micros()
+                ),
+                Err(why) => log::warn!(
+                    "plugins: {} changed and did not load: {why}",
+                    found.manifest.id
+                ),
+            }
+            reloaded.map_err(Reason::Manifest)?;
+            let Some(plugin) = registry.find(extension).cloned() else {
+                return Err(Reason::NoPlugin(extension.to_string()));
+            };
+            self.cache().forget(&plugin.manifest.id);
+            plugin
+        };
+        if !plugin.manifest.enabled {
+            return Err(Reason::Disabled(plugin.manifest.id.clone()));
+        }
+        if !plugin.manifest.speaks_blocks() {
+            return Err(Reason::NoCapability(plugin.manifest.id.clone()));
+        }
+        Ok(plugin)
     }
 
     /// `path`'s blocks, or why they are not here.
     pub fn open(&self, path: &Path) -> View {
         let extension = extension_of(path);
-        let Some(plugin) = self.registry.find(&extension) else {
-            return View::Plain {
-                reason: Reason::NoPlugin(extension),
-            };
+        let plugin = match self.ready(&extension) {
+            Ok(plugin) => plugin,
+            Err(reason) => return View::Plain { reason },
         };
-        if !plugin.manifest.enabled {
-            return View::Plain {
-                reason: Reason::Disabled(plugin.manifest.id.clone()),
-            };
-        }
-        if !plugin.manifest.speaks_blocks() {
-            return View::Plain {
-                reason: Reason::NoCapability(plugin.manifest.id.clone()),
-            };
-        }
         let real = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let key = Key::new(&real, plugin);
+        let key = Key::new(&real, &plugin);
         if let Some(key) = &key
             && let Some(cached) = self.cache().get(key)
         {
@@ -133,7 +159,7 @@ impl Host {
             content_omitted: omitted,
             capabilities: &[BLOCKS],
         };
-        match supervisor::run(plugin, &request) {
+        match supervisor::run(&plugin, &request) {
             Ok(response) => {
                 if let Some(key) = key {
                     self.cache().put(
@@ -155,6 +181,12 @@ impl Host {
                 reason: failure.into(),
             },
         }
+    }
+
+    fn registry(&self) -> std::sync::MutexGuard<'_, manifest::Registry> {
+        self.registry
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     fn cache(&self) -> std::sync::MutexGuard<'_, Cache> {
@@ -213,6 +245,8 @@ pub enum Reason {
     Disabled(String),
     /// The plugin does not produce blocks.
     NoCapability(String),
+    /// The plugin's manifest broke after it loaded.
+    Manifest(String),
     /// The file could not be read.
     Read(String),
     /// The plugin's process did not start.
@@ -240,6 +274,7 @@ impl fmt::Display for Reason {
             Reason::NoPlugin(extension) => write!(f, "no plugin reads {extension} files"),
             Reason::Disabled(id) => write!(f, "plugin {id} is switched off"),
             Reason::NoCapability(id) => write!(f, "plugin {id} produces no blocks"),
+            Reason::Manifest(why) => write!(f, "the plugin's manifest is broken: {why}"),
             Reason::Read(why) => write!(f, "the file did not read: {why}"),
             Reason::Spawn(why) => write!(f, "the plugin did not start: {why}"),
             Reason::Request(why) => write!(f, "the request did not serialize: {why}"),

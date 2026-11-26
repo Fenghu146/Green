@@ -10,6 +10,14 @@ import json
 import sys
 
 
+def literal(text: str) -> str:
+    """A cell's text as Markdown shows it, not as Markdown means it."""
+    text = text.replace("\\", "\\\\")
+    for mark in "`*_[]<>|":
+        text = text.replace(mark, "\\" + mark)
+    return text.replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>")
+
+
 def main() -> int:
     # Windows pipes take the locale's encoding unless told otherwise.
     for stream in (sys.stdin, sys.stdout, sys.stderr):
@@ -33,6 +41,7 @@ def main() -> int:
     if rows:
         width = max(len(row) for row in rows)
         rows = [row + [""] * (width - len(row)) for row in rows]
+        rows = [[literal(cell) for cell in row] for row in rows]
         blocks = [{"kind": "table", "head": rows[0], "rows": rows[1:]}]
 
     print(json.dumps({

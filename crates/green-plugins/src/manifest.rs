@@ -6,6 +6,7 @@
 use std::{
     fs, io,
     path::{Path, PathBuf},
+    time::UNIX_EPOCH,
 };
 
 use serde::Deserialize;
@@ -19,8 +20,8 @@ pub const BLOCKS: &str = "blocks@1";
 /// `timeoutMs` when a manifest leaves it out.
 pub const DEFAULT_TIMEOUT_MS: u64 = 3_000;
 
-/// The timeouts a manifest may ask for.
-const TIMEOUTS: std::ops::RangeInclusive<u64> = 50..=600_000;
+/// The timeouts a manifest may ask for; a run includes the process's start.
+const TIMEOUTS: std::ops::RangeInclusive<u64> = 50..=30_000;
 
 /// What a plugin's folder declares.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,12 +148,67 @@ pub fn normalize_extension(extension: &str) -> Option<String> {
     Some(format!(".{extension}"))
 }
 
+/// A file's mtime and size, the two things a change shows in.
+pub(crate) fn stamp(path: &Path) -> Option<(Option<u128>, u64)> {
+    let meta = fs::metadata(path).ok()?;
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|since| since.as_nanos());
+    Some((modified, meta.len()))
+}
+
+/// What a plugin runs, and the manifest itself, as they were read.
+///
+/// A changed script or manifest is noticed at the next open, so a plugin
+/// author never restarts Green to see an edit (design §3).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Fingerprint {
+    files: Vec<(PathBuf, Option<u128>, u64)>,
+}
+
+impl Fingerprint {
+    /// The manifest and every `command` part that names a file, as they are.
+    pub fn of(dir: &Path, manifest: &Manifest) -> Fingerprint {
+        let mut files = Vec::new();
+        let mut add = |path: PathBuf| {
+            if let Some((modified, size)) = stamp(&path) {
+                files.push((path, modified, size));
+            }
+        };
+        add(dir.join("manifest.json"));
+        for part in &manifest.command {
+            let path = Path::new(part);
+            let path = match path.is_absolute() {
+                true => path.to_path_buf(),
+                false => dir.join(path),
+            };
+            // A bare program name comes from PATH; only files are watched.
+            if path.is_file() {
+                add(path);
+            }
+        }
+        files.sort();
+        Fingerprint { files }
+    }
+
+    /// Whether every file it named still has its time and size.
+    pub fn current(&self) -> bool {
+        self.files.iter().all(|(path, modified, size)| {
+            stamp(path).is_some_and(|(now, len)| now == *modified && len == *size)
+        })
+    }
+}
+
 /// A plugin folder that loaded.
 #[derive(Clone, Debug)]
 pub struct Plugin {
     /// Its folder, and the working folder of its process.
     pub dir: PathBuf,
     pub manifest: Manifest,
+    /// The files a change in must reload it.
+    pub(crate) fingerprint: Fingerprint,
 }
 
 /// A folder that did not load, and why; it is logged, never fatal.
@@ -238,10 +294,50 @@ impl Registry {
         let path = folder.join("manifest.json");
         let bytes = fs::read(&path).map_err(|error| format!("manifest.json: {error}"))?;
         let manifest = Manifest::parse(&bytes)?;
+        let fingerprint = Fingerprint::of(folder, &manifest);
         Ok(Plugin {
             dir: folder.to_path_buf(),
             manifest,
+            fingerprint,
         })
+    }
+
+    /// Reads `folder` again; replaces its plugin or records why it cannot load.
+    pub fn reload(&mut self, folder: &Path) -> Result<(), String> {
+        let loaded = Self::one(folder);
+        self.plugins.retain(|plugin| plugin.dir != folder);
+        self.problems.retain(|problem| problem.dir != folder);
+        match loaded {
+            Ok(plugin) => {
+                if let Some(owner) = self
+                    .plugins
+                    .iter()
+                    .find(|known| known.manifest.id == plugin.manifest.id)
+                {
+                    let why = format!(
+                        "id {:?} is already used by {}",
+                        plugin.manifest.id,
+                        owner.dir.display()
+                    );
+                    self.problems.push(Problem {
+                        dir: folder.to_path_buf(),
+                        why: why.clone(),
+                    });
+                    return Err(why);
+                }
+                self.plugins.push(plugin);
+                self.plugins
+                    .sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
+                Ok(())
+            }
+            Err(why) => {
+                self.problems.push(Problem {
+                    dir: folder.to_path_buf(),
+                    why: why.clone(),
+                });
+                Err(why)
+            }
+        }
     }
 
     /// Every plugin that loaded, enabled or not.
@@ -317,6 +413,21 @@ mod tests {
     }
 
     #[test]
+    fn a_fingerprint_follows_the_script() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let script = dir.path().join("csv_plugin.py");
+        std::fs::write(&script, "print(1)\n").expect("a script");
+        std::fs::write(dir.path().join("manifest.json"), GOOD).expect("a manifest");
+        let manifest = Manifest::parse(GOOD.as_bytes()).expect("a manifest");
+        let fingerprint = Fingerprint::of(dir.path(), &manifest);
+        assert!(fingerprint.current());
+        // The same length, so the mtime is what changes.
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        std::fs::write(&script, "print(2)\n").expect("a script");
+        assert!(!fingerprint.current());
+    }
+
+    #[test]
     fn a_broken_manifest_is_refused_with_a_reason() {
         assert!(parsed("{").expect_err("syntax").contains("invalid JSON"));
         let other = GOOD.replace("\"apiVersion\": 1", "\"apiVersion\": 2");
@@ -337,6 +448,14 @@ mod tests {
                 .expect_err("a timeout")
                 .contains("timeoutMs 0")
         );
+        let capped = GOOD.replace("3000", "30001");
+        assert!(
+            parsed(&capped)
+                .expect_err("a timeout")
+                .contains("timeoutMs 30001")
+        );
+        let slowest = GOOD.replace("3000", "30000");
+        assert_eq!(parsed(&slowest).expect("the cap").timeout_ms, 30_000);
     }
 
     #[test]
