@@ -15,7 +15,7 @@ crates/       基座（ElyOffice 剪枝）：ely-ui（外壳、主题、设置�
               ely-office（标签、打开/保存、会话、恢复）
               ely-lok / ely-office 的 LOK 耦合保留不动：只作编译期依赖，不打包 worker、不启动
               ely-files  ely-ipc  ely-start  ely-mail-engine  ely-mail-fake
-assets/fonts/ 随包字体：Noto Sans CJK SC Regular/Bold 与 Noto Sans Math（OFL-1.1），GPUI 与 Typst 共用
+assets/fonts/ 随包字体：Noto Sans CJK SC Regular/Bold、Noto Sans Math、Noto Sans Mono（OFL-1.1），GPUI 与 Typst 共用
 vendor/       经 [patch.crates-io] 换入的上游副本（gpui-pre 等），不改上游语义
 packaging/    三端打包脚本；S6 使用
 docs/         design.md 与历史；docs/base/ 是基座原文

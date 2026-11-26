@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use green_export::{Block, Cli, Inline, export};
+use green_export::{Block, Cli, Inline, Style, export};
 
 fn typst() -> Option<PathBuf> {
     std::env::var_os("GREEN_TYPST").map(PathBuf::from)
@@ -28,6 +28,15 @@ fn the_assignment_note_stays_under_two_megabytes() {
     .expect("the formula fixture");
 
     let mut blocks = vec![Block::Heading(2, Inline::plain("作业：指令系统"))];
+    // The note's own code spans and a fenced block, so the code face is in the PDF.
+    blocks.push(Block::Paragraph(Inline::styled(
+        "操作由 op1 区分",
+        vec![(9..12, Style::Code)],
+    )));
+    blocks.push(Block::Code {
+        language: Some("rust".into()),
+        text: "let x = 1;".into(),
+    });
     let mut count = 0;
     for formula in formulas
         .lines()
@@ -61,6 +70,7 @@ fn the_assignment_note_stays_under_two_megabytes() {
         "NotoSansCJKsc-Regular",
         "NotoSansCJKsc-Bold",
         "NotoSansMath-Regular",
+        "NotoSansMono-Regular",
     ];
     for font in &export.audit.fonts {
         assert!(
@@ -70,13 +80,11 @@ fn the_assignment_note_stays_under_two_megabytes() {
             export.audit.fonts
         );
     }
-    assert!(
-        export
-            .audit
-            .fonts
-            .iter()
-            .any(|font| font.name == "NotoSansMath-Regular"),
-        "math fell back to another font: {:?}",
-        export.audit.fonts
-    );
+    for family in ["NotoSansMath-Regular", "NotoSansMono-Regular"] {
+        assert!(
+            export.audit.fonts.iter().any(|font| font.name == family),
+            "{family} is missing; something fell back: {:?}",
+            export.audit.fonts
+        );
+    }
 }

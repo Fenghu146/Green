@@ -8,8 +8,19 @@ use gpui::App;
 /// The family Green's text uses unless a setting says otherwise.
 pub const FAMILY: &str = "Noto Sans CJK SC";
 
-/// The weights shipped; Regular and Bold.
-const FILES: [&str; 2] = ["NotoSansCJKsc-Regular.otf", "NotoSansCJKsc-Bold.otf"];
+/// The family code, paths and spans use, on screen and in the export.
+pub const MONO: &str = "Noto Sans Mono";
+
+/// The family formulas use, in the editor and in the export.
+pub const MATH: &str = "Noto Sans Math";
+
+/// The faces shipped: the two CJK weights, and the math and code faces.
+const FILES: [&str; 4] = [
+    "NotoSansCJKsc-Regular.otf",
+    "NotoSansCJKsc-Bold.otf",
+    "NotoSansMath-Regular.ttf",
+    "NotoSansMono-Regular.ttf",
+];
 
 /// A build from source keeps the files in the repository.
 const DEV: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts");
@@ -45,11 +56,13 @@ pub fn install(cx: &App) -> Result<()> {
         .collect::<Vec<_>>();
     log::info!("fonts: {} files from {}", fonts.len(), dir().display());
     cx.text_system().add_fonts(fonts)?;
-    anyhow::ensure!(
-        cx.text_system().all_font_names().iter().any(|name| name == FAMILY),
-        "{FAMILY} is not in the files at {}",
-        dir().display()
-    );
+    for family in [FAMILY, MONO, MATH] {
+        anyhow::ensure!(
+            cx.text_system().all_font_names().iter().any(|name| *name == *family),
+            "{family} is not in the files at {}",
+            dir().display()
+        );
+    }
     log::info!("fonts: Typst reads {} families from the same files", book()?.families().count());
     Ok(())
 }

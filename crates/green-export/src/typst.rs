@@ -11,6 +11,10 @@ pub(crate) const PREAMBLE: &str = "\
 #set page(paper: \"a4\", margin: (x: 2.2cm, y: 2.4cm))
 #set text(font: (\"Noto Sans CJK SC\",), size: 10.5pt, lang: \"zh\")
 #set par(justify: true, leading: 0.95em, spacing: 1.15em)
+#show raw: set text(font: (\"Noto Sans Mono\", \"Noto Sans CJK SC\"))
+// The marks the source spells as emoji: brand deep green passes, red fails.
+#let mark-ok = rgb(\"#2e7d46\")
+#let mark-no = rgb(\"#b42318\")
 // The same faces the editor draws with: math as Noto Sans Math, CJK beside it.
 #show math.equation: set text(font: (\"Noto Sans Math\", \"Noto Sans CJK SC\"))
 #set heading(numbering: none)
@@ -336,15 +340,15 @@ pub fn formula(tex: &str) -> Result<String> {
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
-        // Emoji the bundled faces have no glyph for, as symbols Typst draws.
-        // There is no cross mark in Noto Sans CJK or Noto Sans Math, so `×`.
+        // Emoji the bundled faces have no glyph for, as the symbols they do
+        // have, in the mark colours: a green pass, a red fail.
         match ch {
             '✅' => {
-                out.push_str("#sym.checkmark");
+                out.push_str("#text(fill: mark-ok)[#sym.checkmark]");
                 continue;
             }
             '❌' => {
-                out.push_str("#sym.times");
+                out.push_str("#text(fill: mark-no)[#sym.times]");
                 continue;
             }
             _ => {}
