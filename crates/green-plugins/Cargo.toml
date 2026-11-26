@@ -4,7 +4,6 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
 description = "Green's external-process plugins: manifests, supervision and the Block contract (design §3)."
 
 [lints]
