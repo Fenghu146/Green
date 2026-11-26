@@ -1,0 +1,16 @@
+<svg viewBox="0 0 1254 1254" width="1254" height="1254" xmlns="http://www.w3.org/2000/svg">
+  <title>Green Markdown notes app icon, 32px and smaller</title>
+  <defs>
+    <linearGradient id="background-gradient" x1="627" y1="46" x2="627" y2="1226" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4CB262" />
+      <stop offset="1" stop-color="#2E7D46" />
+    </linearGradient>
+  </defs>
+  <g id="icon-background">
+    <rect x="32" y="46" width="1188" height="1180" rx="286" fill="url(#background-gradient)" />
+  </g>
+  <g id="leaf" stroke="#1E3B26" stroke-linecap="round" stroke-linejoin="round"
+     transform="translate(647 627) scale(1.24) translate(-647 -627)">
+    <path d="M386 877 C334 783 365 662 435 576 C501 494 592 447 695 423 C790 401 882 393 956 341 C961 499 922 670 842 777 C747 904 586 946 436 912 C415 907 399 905 386 914 Z" fill="#EAF8E0" stroke-width="44" />
+  </g>
+</svg>
