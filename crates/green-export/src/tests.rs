@@ -8,7 +8,7 @@ use crate::doc::{Align, Block, Inline, Item, Style};
 use crate::typst::{self, PREAMBLE};
 
 fn body(blocks: &[Block]) -> String {
-    let out = typst::source(blocks).expect("the source");
+    let (out, _) = typst::source(blocks).expect("the source");
     out.strip_prefix(PREAMBLE)
         .expect("the preamble first")
         .to_string()
@@ -53,10 +53,33 @@ fn inline_math_goes_through_green_math() {
 }
 
 #[test]
-fn a_formula_outside_the_whitelist_is_named() {
-    let error = typst::source(&[Block::Math("\\notacommand x".into())]).expect_err("a refusal");
-    let said = format!("{error:#}");
-    assert!(said.contains("notacommand"), "{said}");
+fn a_formula_outside_the_whitelist_stays_as_its_tex() {
+    let (out, kept) = typst::source(&[Block::Math("\\notacommand x".into())]).expect("the source");
+    assert!(out.contains("\\$\\\\notacommand x\\$"), "{out}");
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(kept[0].1.contains("notacommand"), "{kept:?}");
+}
+
+#[test]
+fn one_refused_formula_does_not_take_the_rest_down() {
+    let blocks = [
+        Block::Paragraph(Inline::plain("before")),
+        Block::Math("\\begin{aligned} a &= b \\end{aligned}".into()),
+        Block::Paragraph(Inline::plain("after")),
+    ];
+    let (out, kept) = typst::source(&blocks).expect("the source");
+    assert!(out.contains("before") && out.contains("after"), "{out}");
+    assert!(out.contains("\\begin{aligned}"), "the TeX stays: {out}");
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(kept[0].1.contains("begin"), "{kept:?}");
+}
+
+#[test]
+fn inline_math_outside_the_whitelist_keeps_its_tex_as_text() {
+    let inline = Inline::styled("看 \\notacommand x 后", vec![(4..16, Style::Math)]);
+    let (out, kept) = typst::source(&[Block::Paragraph(inline)]).expect("the source");
+    assert!(out.contains("看 \\\\notacommand x 后"), "{out}");
+    assert_eq!(kept.len(), 1, "{kept:?}");
 }
 
 #[test]

@@ -26,7 +26,7 @@ use super::{
 };
 
 /// `text` as the PDF at `path`; `beside` holds the document, `work` is scratch.
-pub fn write(text: &str, path: &Path, beside: Option<&Path>, work: &Path) -> io::Result<Page> {
+pub fn write(text: &str, path: &Path, beside: Option<&Path>, work: &Path, alerts: &[String; 5]) -> io::Result<Page> {
     let nodes = nodes_of(text);
     let folder = work.join("pdf");
     fs::create_dir_all(&folder)?;
@@ -38,6 +38,7 @@ pub fn write(text: &str, path: &Path, beside: Option<&Path>, work: &Path) -> io:
         folder: &folder,
         inline: 0,
         missing: Vec::new(),
+        alerts,
     };
     let mut page = Page::default();
     let blocks = blocks_of(&nodes, &mut carried)?;
@@ -47,6 +48,18 @@ pub fn write(text: &str, path: &Path, beside: Option<&Path>, work: &Path) -> io:
     let export = green_export::export(&blocks, path, &compiler, &fonts).map_err(io::Error::other)?;
     // Characters no bundled face draws print as tofu: say which, and where.
     page.missing.extend(export.missing.iter().map(|missing| missing.describe()));
+    // Formulas the converter refused stay as their TeX (§7.8): say which.
+    page.formulas_kept = export
+        .formulas
+        .iter()
+        .map(|(tex, _)| {
+            let one = tex.lines().next().unwrap_or_default().trim();
+            match one.chars().count() > 60 {
+                true => format!("{}…", one.chars().take(60).collect::<String>()),
+                false => one.to_string(),
+            }
+        })
+        .collect();
     Ok(page)
 }
 
@@ -108,6 +121,8 @@ struct Carried<'a, 'b> {
     inline: usize,
     /// Pictures left out, as the document wrote them.
     missing: Vec<String>,
+    /// The five alert titles, in the window's language.
+    alerts: &'a [String; 5],
 }
 
 impl Carried<'_, '_> {
@@ -219,7 +234,7 @@ fn block_of(node: &MarkdownBlock, carried: &mut Carried) -> io::Result<Option<Bl
             body: blocks_of(body, carried)?,
         },
         MarkdownBlock::Alert { kind, body } => Block::Alert {
-            title: alert_title(*kind).to_string(),
+            title: alert_title(*kind, carried.alerts).to_string(),
             body: blocks_of(body, carried)?,
         },
         MarkdownBlock::Toc(_) => Block::Toc,
@@ -262,9 +277,15 @@ fn align_of(align: AlignKind) -> Align {
     }
 }
 
-/// The title GitHub shows for an alert, as the HTML export shows it.
-fn alert_title(kind: AlertKind) -> &'static str {
-    kind.title()
+/// An alert's title in the window's language, as the page shows it.
+fn alert_title(kind: AlertKind, alerts: &[String; 5]) -> &str {
+    &alerts[match kind {
+        AlertKind::Note => 0,
+        AlertKind::Tip => 1,
+        AlertKind::Important => 2,
+        AlertKind::Warning => 3,
+        AlertKind::Caution => 4,
+    }]
 }
 
 #[cfg(test)]
@@ -285,11 +306,13 @@ mod tests {
         shelf: &'a Pictures,
     ) -> (Vec<Block>, Vec<String>, Placed<'a>) {
         let mut placed = Placed::new(beside, shelf);
+        let alerts = ["Note", "Tip", "Important", "Warning", "Caution"].map(str::to_string);
         let mut carried = Carried {
             placed: &mut placed,
             folder,
             inline: 0,
             missing: Vec::new(),
+            alerts: &alerts,
         };
         let blocks = blocks_of(&nodes_of(text), &mut carried).expect("the blocks");
         (blocks, carried.missing, placed)

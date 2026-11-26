@@ -3,6 +3,11 @@
 pub(super) const DE: &[(&str, &str)] = &[
     ("mark.pane.files", "Dateien"),
     ("mark.math.unsupported", "\\{name} an Byte {at} steht nicht auf der Formel-Whitelist"),
+    ("mark.alert.note", "Hinweis"),
+    ("mark.alert.tip", "Tipp"),
+    ("mark.alert.important", "Wichtig"),
+    ("mark.alert.warning", "Warnung"),
+    ("mark.alert.caution", "Vorsicht"),
     ("mark.tool.insert", "Einfügen"),
     ("mark.tool.more", "Mehr"),
     ("mark.pane.outline", "Gliederung"),

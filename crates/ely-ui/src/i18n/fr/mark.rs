@@ -3,6 +3,11 @@
 pub(super) const FR: &[(&str, &str)] = &[
     ("mark.pane.files", "Fichiers"),
     ("mark.math.unsupported", "\\{name} à l'octet {at} n'est pas dans la liste des formules autorisées"),
+    ("mark.alert.note", "Note"),
+    ("mark.alert.tip", "Astuce"),
+    ("mark.alert.important", "Important"),
+    ("mark.alert.warning", "Avertissement"),
+    ("mark.alert.caution", "Attention"),
     ("mark.tool.insert", "Insérer"),
     ("mark.tool.more", "Plus"),
     ("mark.pane.outline", "Plan"),

@@ -26,6 +26,8 @@ pub struct Target<'a> {
     pub revision: u64,
     /// A scratch folder of the tab's.
     pub work: &'a Path,
+    /// The five alert titles, in the window's language.
+    pub alerts: &'a [String; 5],
 }
 
 /// `text` written as `format`; what it left out.
@@ -83,7 +85,7 @@ fn pdf(text: &str, beside: Option<&Path>, target: &Target) -> io::Result<Page> {
     std::fs::create_dir_all(&dir)?;
     let set = (|| -> io::Result<Page> {
         let out = dir.join("out.pdf");
-        let page = super::pdf::write(text, &out, beside, target.work)?;
+        let page = super::pdf::write(text, &out, beside, target.work, target.alerts)?;
         export(target, &std::fs::read(&out)?)?;
         Ok(page)
     })();

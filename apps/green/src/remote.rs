@@ -145,6 +145,7 @@ impl Desk {
         };
         let session = source.session.path().map(PathBuf::from);
         let (revision, work) = (source.session.revision(), source.work.clone());
+        let alerts = crate::output::alerts(cx);
         cx.spawn(async move |_, cx| {
             let named = remote::path_json(&target.display().to_string());
             let written = cx
@@ -156,6 +157,7 @@ impl Desk {
                         session: session.as_deref(),
                         revision,
                         work: &work,
+                        alerts: &alerts,
                     };
                     output::write(format, &markdown, beside, &to)
                 })
