@@ -19,8 +19,22 @@ env:
   RUST_BACKTRACE: 1
   # Python's UTF-8 mode: a Windows console is cp1252, and this repo prints Chinese.
   PYTHONUTF8: 1
+  # Incremental artifacts are the bulk of a debug target and the cache restores
+  # whole crates anyway; turning them off buys back gigabytes.
+  CARGO_INCREMENTAL: 0
 
 jobs:
+  # The runners share the workspace drive with the build; a full disk fails rustc
+  # with no useful message. This names the number and the directories first.
+  disk:
+    name: disk
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: scripts/disk.sh 4G .
+
   build:
     name: build
     runs-on: windows-latest
@@ -40,6 +54,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+        with:
+          # A red run still leaves the next one a cache to restore.
+          cache-on-failure: true
       - run: rustup show active-toolchain
       # ely-lok as its own package: under the workspace's unified features three
       # view::reveal tests need a LOK kernel and panic without ELY_LOK_DIR.
@@ -70,6 +87,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - run: rustup show active-toolchain
       # Red on main as of 2026-11-26, for two errors in test code that the S2
       # working tree already fixes: apps/green/src/output/tests.rs calls
@@ -92,6 +111,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - run: rustup show active-toolchain
       # Warnings do not fail the job. One is open and ours: clippy::type_complexity
       # in green-math's `cached` (the SEEN OnceLock type). `vendor/` is upstream
