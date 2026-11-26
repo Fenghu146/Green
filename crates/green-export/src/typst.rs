@@ -3,7 +3,7 @@
 use anyhow::{Result, anyhow};
 use green_math::latex_to_typst;
 
-use crate::doc::{Align, Block, Inline, Style};
+use crate::doc::{Align, Block, Inline, Item, Style};
 
 /// What every export page shares: the A4 sheet, the bundled CJK font, and
 /// justified Chinese paragraphs.
@@ -25,12 +25,15 @@ pub(crate) const PREAMBLE: &str = "\
 
 ";
 
-/// `blocks` as one Typst document.
-pub fn source(blocks: &[Block]) -> Result<String> {
+/// `blocks` as one Typst document, and every formula kept as its TeX because
+/// the converter refused it (§7.8: one formula must not take the document down).
+pub fn source(blocks: &[Block]) -> Result<(String, Vec<(String, String)>)> {
+    let mut kept = Vec::new();
+    let blocks = settled(blocks, &mut kept);
     let mut out = String::from(PREAMBLE);
-    blocks_into(&mut out, blocks, "")?;
+    blocks_into(&mut out, &blocks, "")?;
     let mut notes = Vec::new();
-    collect_notes(blocks, &mut notes);
+    collect_notes(&blocks, &mut notes);
     if !notes.is_empty() {
         out.push_str("#v(1.5em)\n#line(length: 100%, stroke: 0.4pt)\n");
         out.push_str("#text(size: 0.85em)[\n");
@@ -43,7 +46,74 @@ pub fn source(blocks: &[Block]) -> Result<String> {
         }
         out.push_str("]\n");
     }
-    Ok(out)
+    Ok((out, kept))
+}
+
+/// `blocks` with every formula the converter refuses kept as text: a block
+/// formula as its literal `$…$`, an inline one as its TeX with the math mark
+/// taken off. Each is recorded with why.
+fn settled(blocks: &[Block], kept: &mut Vec<(String, String)>) -> Vec<Block> {
+    blocks
+        .iter()
+        .map(|block| match block {
+            Block::Math(tex) => match formula(tex) {
+                Ok(_) => block.clone(),
+                Err(error) => {
+                    kept.push((tex.clone(), format!("{error:#}")));
+                    Block::Paragraph(Inline::plain(format!("${tex}$")))
+                }
+            },
+            Block::Paragraph(text) => Block::Paragraph(settled_inline(text, kept)),
+            Block::Heading(level, text) => Block::Heading(*level, settled_inline(text, kept)),
+            Block::Quote(body) => Block::Quote(settled(body, kept)),
+            Block::Alert { title, body } => Block::Alert {
+                title: title.clone(),
+                body: settled(body, kept),
+            },
+            Block::Footnote { label, body } => Block::Footnote {
+                label: label.clone(),
+                body: settled(body, kept),
+            },
+            Block::List { start, items } => Block::List {
+                start: *start,
+                items: items
+                    .iter()
+                    .map(|item| Item {
+                        task: item.task,
+                        blocks: settled(&item.blocks, kept),
+                    })
+                    .collect(),
+            },
+            Block::Table { aligns, head, rows } => Block::Table {
+                aligns: aligns.clone(),
+                head: head.iter().map(|cell| settled(cell, kept)).collect(),
+                rows: rows
+                    .iter()
+                    .map(|row| row.iter().map(|cell| settled(cell, kept)).collect())
+                    .collect(),
+            },
+            other => other.clone(),
+        })
+        .collect()
+}
+
+/// `text` without the math marks the converter refuses; the TeX stays as text.
+fn settled_inline(text: &Inline, kept: &mut Vec<(String, String)>) -> Inline {
+    let mut out = text.clone();
+    out.styles.retain(|(range, style)| match style {
+        Style::Math => {
+            let tex = &text.text[range.clone()];
+            match formula(tex) {
+                Ok(_) => true,
+                Err(error) => {
+                    kept.push((tex.to_string(), format!("{error:#}")));
+                    false
+                }
+            }
+        }
+        _ => true,
+    });
+    out
 }
 
 /// One block's markup, every line prefixed with `indent`.

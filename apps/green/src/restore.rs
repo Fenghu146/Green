@@ -3,7 +3,7 @@
 use std::{
     io,
     path::{Path, PathBuf},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use ely_files::{Crash, Marker, Recovery, Turns};
@@ -18,6 +18,9 @@ use crate::view::{Mode, Place};
 
 mod store;
 use store::sweep_logged;
+
+/// The session list is a few hundred bytes: a crash costs at most this much of it.
+const KEEP_EVERY: Duration = Duration::from_secs(2);
 
 /// A kept tab: file, mode, place, recovery folder.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -291,6 +294,10 @@ impl Desk {
             .map_or(0, |since| since.as_millis());
         let mut kept = Vec::new();
         for tab in &mut self.core.tabs {
+            // A page comes back by opening it again, not from the session.
+            if tab.extra.special {
+                continue;
+            }
             if tab.extra.slot.is_empty() {
                 tab.extra.slot = format!("{started}-{}", tab.id);
             }
@@ -405,11 +412,11 @@ impl Desk {
         }
     }
 
-    /// Keeps every ten seconds while the window lives (§6.2).
+    /// Keeps every two seconds while the window lives (§6.2).
     pub fn keep_every(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |desk, cx| {
             loop {
-                cx.background_executor().timer(Recovery::INTERVAL).await;
+                cx.background_executor().timer(KEEP_EVERY).await;
                 if desk.update(cx, |desk, cx| desk.keep(cx)).is_err() {
                     break;
                 }

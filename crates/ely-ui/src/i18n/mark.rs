@@ -3,6 +3,11 @@
 pub(super) const EN: &[(&str, &str)] = &[
     ("mark.pane.files", "Files"),
     ("mark.math.unsupported", "\\{name} at byte {at} is not in the formula whitelist; adding it to green-math's whitelist makes it render"),
+    ("mark.alert.note", "Note"),
+    ("mark.alert.tip", "Tip"),
+    ("mark.alert.important", "Important"),
+    ("mark.alert.warning", "Warning"),
+    ("mark.alert.caution", "Caution"),
     ("mark.tool.insert", "Insert"),
     ("mark.tool.more", "More"),
     ("mark.pane.outline", "Outline"),
@@ -66,6 +71,8 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("mark.export.diagrams", "Diagrams that did not draw stay as code, at lines {list}."),
     ("mark.export.formulas", "Formulas that did not render stay as code: {list}."),
     ("mark.export.formula", "line {line}, {error}"),
+    // Removed when the export compiles through the Typst library: no CLI to miss.
+    ("mark.export.no_typst", "PDF export needs Typst: put typst.exe beside Green, set GREEN_TYPST, or add typst to PATH."),
     ("mark.export.folder_taken", "{name} is already there; the pictures need that folder."),
     ("mark.copy.rich", "Copy as Rich Text"),
     ("mark.recovery.failed", "Unsaved text of {name} was not kept for recovery: {error}. Last kept: {at}."),
@@ -109,6 +116,11 @@ pub(super) const EN: &[(&str, &str)] = &[
 pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("mark.pane.files", "文件"),
     ("mark.math.unsupported", "公式里的 \\{name} 不在白名单（第 {at} 个字节）；把它加进 green-math 的白名单就能渲染"),
+    ("mark.alert.note", "注"),
+    ("mark.alert.tip", "提示"),
+    ("mark.alert.important", "重要"),
+    ("mark.alert.warning", "警告"),
+    ("mark.alert.caution", "注意"),
     ("mark.tool.insert", "插入"),
     ("mark.tool.more", "更多"),
     ("mark.pane.outline", "大纲"),
@@ -172,6 +184,8 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("mark.export.diagrams", "没能画出的图表保留为代码，在第 {list} 行。"),
     ("mark.export.formulas", "没能排出的公式保留为代码：{list}。"),
     ("mark.export.formula", "第 {line} 行，{error}"),
+    // 切库集成后删除：那时不再有"找不到 typst 可执行文件"。
+    ("mark.export.no_typst", "导出 PDF 需要 Typst：把 typst.exe 放到 Green 旁边，或设置 GREEN_TYPST，或把 typst 加进 PATH。"),
     ("mark.export.folder_taken", "{name} 已存在；图片要放进这个文件夹。"),
     ("mark.copy.rich", "复制为富文本"),
     ("mark.recovery.failed", "{name} 未保存的文字没能存为恢复点：{error}。上次存下：{at}。"),

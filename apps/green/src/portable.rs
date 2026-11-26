@@ -1,5 +1,10 @@
 //! A `data` folder beside the executable makes this copy portable (S6).
 //!
+//! This is a product decision — how *this* program chooses its data folder —
+//! not a platform capability, so it stays in the app layer: `crates/` must not
+//! learn the word "portable". Move it into `ely-platform` only when a second
+//! app needs the same policy.
+//!
 //! The data folder's own crate (`ely-platform`) is outside this line's
 //! boundary, so the choice is made here, before any thread starts: it is the
 //! same absolute root `ELY_DATA_ROOT` already names, and the folder is

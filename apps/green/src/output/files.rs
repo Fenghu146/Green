@@ -3,7 +3,6 @@
 use std::{
     io,
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 use super::{Page, Pictures, body, document, page_of, pictures::Placed, plain};
@@ -27,6 +26,8 @@ pub struct Target<'a> {
     pub revision: u64,
     /// A scratch folder of the tab's.
     pub work: &'a Path,
+    /// The five alert titles, in the window's language.
+    pub alerts: &'a [String; 5],
 }
 
 /// `text` written as `format`; what it left out.
@@ -47,7 +48,7 @@ pub fn write(
             page
         }
         Format::Linked => linked(text, beside, target, &title)?,
-        Format::Pdf => pdf(text, beside, target, &title)?,
+        Format::Pdf => pdf(text, beside, target)?,
         Format::Text => {
             export(target, plain(text)?.as_bytes())?;
             Page::default()
@@ -78,21 +79,15 @@ fn linked(text: &str, beside: Option<&Path>, target: &Target, title: &str) -> io
     written
 }
 
-/// The page set by MuPDF, in its own scratch.
-fn pdf(text: &str, beside: Option<&Path>, target: &Target, title: &str) -> io::Result<Page> {
-    static JOBS: AtomicU64 = AtomicU64::new(0);
-    let dir = target
-        .work
-        .join(format!("pdf-{}", JOBS.fetch_add(1, Ordering::Relaxed)));
+/// The page set by Typst, through `green-export`.
+fn pdf(text: &str, beside: Option<&Path>, target: &Target) -> io::Result<Page> {
+    let dir = target.work.join("pdf");
     std::fs::create_dir_all(&dir)?;
     let set = (|| -> io::Result<Page> {
-        let page = body(text, beside, &Pictures::Pdf(dir.join("files")))?;
-        std::fs::write(dir.join("page.html"), document(title, &page.html))?;
         let out = dir.join("out.pdf");
-        let _ = &out;
-        return Err(io::Error::new(io::ErrorKind::Unsupported, "pdf export removed"));
-        #[allow(unreachable_code)]
-        { export(target, &std::fs::read(&out)?)?; Ok(page) }
+        let page = super::pdf::write(text, &out, beside, target.work, target.alerts)?;
+        export(target, &std::fs::read(&out)?)?;
+        Ok(page)
     })();
     let cleaned = std::fs::remove_dir_all(&dir);
     let page = set?;

@@ -23,6 +23,9 @@ pub struct Export {
     /// Characters the bundled fonts cannot draw, with where they are; Typst
     /// prints a tofu for them and says nothing, so they are found beforehand.
     pub missing: Vec<Missing>,
+    /// Formulas the converter refused, kept as their TeX in the PDF: the text
+    /// and why (§7.8: one formula does not take the document down).
+    pub formulas: Vec<(String, String)>,
     /// Every size threshold the audit crosses and every missing character;
     /// empty is a good export.
     pub warnings: Vec<Warning>,
@@ -47,7 +50,7 @@ pub fn export(
 ) -> Result<Export> {
     let started = Instant::now();
     let missing = glyphs::missing(blocks, fonts)?;
-    let source = typst::source(blocks)?;
+    let (source, formulas) = typst::source(blocks)?;
     compiler.compile(&source, pdf)?;
     let audit = audit::read(pdf)?;
     let mut warnings = audit.warnings();
@@ -59,11 +62,18 @@ pub fn export(
             },
         );
     }
+    if !formulas.is_empty() {
+        log::warn!("export pdf: {} formulas kept as TeX", formulas.len());
+        for (tex, said) in &formulas {
+            log::warn!("export pdf: formula `{tex}`: {said}");
+        }
+    }
     let export = Export {
         pdf: pdf.to_path_buf(),
         source,
         warnings,
         missing,
+        formulas,
         audit,
         elapsed: started.elapsed(),
     };

@@ -15,7 +15,8 @@ actions!(
         PreviewMode,
         ToggleSource,
         ToggleOutline,
-        CheckDisk
+        CheckDisk,
+        OpenLicenses
     ]
 );
 
@@ -140,6 +141,8 @@ pub fn menus(look: &crate::look::Look, style: Option<TargetBlock>, cx: &App) -> 
             MenuItem::separator(),
             item("mark.outside.check", Box::new(CheckDisk)),
         ]),
+        Menu::new(text(cx, "menu.help", &[]))
+            .items([item("menu.help.licenses", Box::new(OpenLicenses))]),
     ]
 }
 
@@ -171,6 +174,7 @@ impl Desk {
 
     pub fn mode_actions(root: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
         root.on_action(cx.listener(|desk, _: &CheckDisk, _, cx| desk.check_disk(cx)))
+            .on_action(cx.listener(|desk, _: &OpenLicenses, _, cx| desk.open_licenses(cx)))
             .on_action(
                 cx.listener(|desk, _: &ToggleSource, window, cx| desk.toggle_source(window, cx)),
             )

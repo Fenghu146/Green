@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, App, FontWeight, IntoElement, MouseButton, ParentElement, Role, Styled, StyledText,
-    div, prelude::*, svg,
+    AnyElement, App, FontWeight, Global, IntoElement, MouseButton, ParentElement, Role, SharedString,
+    Styled, StyledText, div, prelude::*, svg,
 };
 
 use super::{Draw, LINE, point::point_lines};
@@ -9,6 +9,41 @@ use crate::{
     theme::{ActiveTheme, IconSize, Radius, TextSize},
     tree::{AlertKind, DocumentHeading, Node},
 };
+
+/// The titles an alert is drawn under, in `AlertKind`'s order: note, tip,
+/// important, warning, caution. Unset, GitHub's English stands.
+#[derive(Clone, Debug)]
+pub struct AlertTitles(pub [SharedString; 5]);
+
+impl AlertTitles {
+    /// The titles in force; GitHub's English when the app set none.
+    pub fn current(cx: &App) -> [SharedString; 5] {
+        match cx.try_global::<Self>() {
+            Some(titles) => titles.0.clone(),
+            None => [
+                AlertKind::Note,
+                AlertKind::Tip,
+                AlertKind::Important,
+                AlertKind::Warning,
+                AlertKind::Caution,
+            ]
+            .map(|kind| kind.title().into()),
+        }
+    }
+}
+
+impl Global for AlertTitles {}
+
+/// Where `kind` sits in [`AlertTitles`].
+fn index(kind: AlertKind) -> usize {
+    match kind {
+        AlertKind::Note => 0,
+        AlertKind::Tip => 1,
+        AlertKind::Important => 2,
+        AlertKind::Warning => 3,
+        AlertKind::Caution => 4,
+    }
+}
 
 impl Draw<'_> {
     /// A list; bullets turn with depth, as browsers draw them.
@@ -137,7 +172,7 @@ impl Draw<'_> {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(tone)
                     .child(Icon::new(icon).size(IconSize::Sm).color(tone))
-                    .child(kind.title()),
+                    .child(AlertTitles::current(cx)[index(kind)].clone()),
             )
             .child(
                 div()

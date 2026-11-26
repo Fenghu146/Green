@@ -4,6 +4,11 @@ use super::{Pictures, body, document, plain};
 
 mod visual;
 
+/// The alert titles a test export uses.
+pub(super) static ALERTS: std::sync::LazyLock<[String; 5]> = std::sync::LazyLock::new(|| {
+    ["Note", "Tip", "Important", "Warning", "Caution"].map(str::to_string)
+});
+
 fn page(text: &str, beside: Option<&Path>, pictures: &Pictures) -> super::Page {
     body(text, beside, pictures).expect("a page")
 }
@@ -238,6 +243,7 @@ mod files {
             session: None,
             revision: 1,
             work,
+            alerts: &super::ALERTS,
         }
     }
 
@@ -356,6 +362,7 @@ fn a_failed_linked_page_takes_the_folder_it_made() {
         session: None,
         revision: 1,
         work: dir.path(),
+        alerts: &ALERTS,
     };
     super::write(
         super::Format::Linked,

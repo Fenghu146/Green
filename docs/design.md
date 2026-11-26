@@ -271,6 +271,8 @@ export pdf: pages=12 bytes=845120 fonts=[{"name":"SourceHanSansSC","bytes":41200
 阈值：单页均值 > 500 KB、单字体 > 3 MB、图片占比 > 70%、任一图片覆盖页面积 > 40% → 日志 + 状态栏。
 验收：用户 `作业.md` **≤ 2 MB**、导出 ≤ 10 s、`compressed=true`、`max_image_coverage ≈ 0`、`pdffonts` 全 `sub=yes`，且 `pdffonts` 里每个字体都来自 `assets/fonts/`（出现别的字体即字体漂移，比体积超限更严重）。
 
+**发布阻断项（v1.0 前必须完成）：导出改走 Typst 库。** 现在 app 通过 `typst` 可执行文件导出（`GREEN_TYPST` → exe 旁 → PATH），这是过渡：便携包不带 52 MB 的 CLI，而且"exe 在哪、版本对不对"不该变成用户的问题——离线机器点导出必须能出 PDF。切到 `typst`/`typst-pdf` 库（增量 10–15 MB，见 §1.4 体积预算）后删掉 CLI 这条路。切库之前，找不到 typst 时导出必须明确报错并说明三种办法，不得静默失败。
+
 ## 8. 界面（按 ima 骨架，去掉 AI）
 
 顶栏两行：**标签栏**（§4）+ **工具条**（高 40 px，图标按钮 28×28、圆角 6 px、组间 1 px 分隔线）。

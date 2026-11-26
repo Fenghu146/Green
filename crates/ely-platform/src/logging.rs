@@ -14,17 +14,43 @@ use crate::{AppId, data_dir};
 
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-struct Tee(File);
+/// How often a long-running log checks its size.
+const CHECK: u64 = 256 * 1024;
+
+struct Tee {
+    file: File,
+    path: PathBuf,
+    cap: u64,
+    written: u64,
+}
+
+impl Tee {
+    /// Every record reaches the disk at once, so a crash shows the last thing done.
+    fn write_record(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.file.write_all(buf)?;
+        self.file.flush()?;
+        io::stderr().write_all(buf)?;
+        self.written += buf.len() as u64;
+        let step = (self.cap / 8).clamp(64, CHECK);
+        if self.written >= step {
+            self.written = 0;
+            let length = self.file.metadata()?.len();
+            if length > self.cap {
+                trimmed(&self.path, self.cap)?;
+            }
+        }
+        Ok(())
+    }
+}
 
 impl Write for Tee {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.write_all(buf)?;
-        io::stderr().write_all(buf)?;
+        self.write_record(buf)?;
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.0.flush()?;
+        self.file.flush()?;
         io::stderr().flush()
     }
 }
@@ -134,7 +160,12 @@ fn attach(name: &str, path: PathBuf) -> Result<()> {
         .with_context(|| format!("cannot open {}", path.display()))?;
     let logger = built(
         &mut Builder::from_env(Env::new().filter_or("ELY_LOG", DEFAULT)),
-        Target::Pipe(Box::new(Tee(file))),
+        Target::Pipe(Box::new(Tee {
+            file,
+            path: path.clone(),
+            cap: LOG_CAP,
+            written: 0,
+        })),
     );
     let level = logger.filter();
     log::set_boxed_logger(Box::new(Private(logger))).context("a logger is already set")?;
@@ -144,6 +175,7 @@ fn attach(name: &str, path: PathBuf) -> Result<()> {
     let previous = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         log::error!("panic: {info}");
+        log::logger().flush();
         previous(info);
     }));
     log::info!("{name} {} started", env!("CARGO_PKG_VERSION"));
@@ -163,6 +195,31 @@ mod trim_tests {
         assert!(kept.len() <= 500 && kept.starts_with("line ") && kept.ends_with("line 199\n"), "{kept}");
         super::trimmed(&path, 1000).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), kept, "a short log stays");
+    }
+
+    #[test]
+    fn a_long_log_rolls_while_it_is_written() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ely.log");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        let mut tee = super::Tee {
+            file,
+            path: path.clone(),
+            cap: 1000,
+            written: 0,
+        };
+        for n in 0..200 {
+            writeln!(tee, "line {n:03}").unwrap();
+        }
+        tee.flush().unwrap();
+        let kept = std::fs::read_to_string(&path).unwrap();
+        assert!(kept.len() <= 1200, "{}", kept.len());
+        assert!(kept.ends_with("line 199\n"), "{kept}");
     }
 }
 

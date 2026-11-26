@@ -3,6 +3,11 @@
 pub(super) const ES: &[(&str, &str)] = &[
     ("mark.pane.files", "Archivos"),
     ("mark.math.unsupported", "\\{name} en el byte {at} no está en la lista de fórmulas permitidas"),
+    ("mark.alert.note", "Nota"),
+    ("mark.alert.tip", "Consejo"),
+    ("mark.alert.important", "Importante"),
+    ("mark.alert.warning", "Advertencia"),
+    ("mark.alert.caution", "Precaución"),
     ("mark.tool.insert", "Insertar"),
     ("mark.tool.more", "Más"),
     ("mark.pane.outline", "Esquema"),
@@ -117,6 +122,7 @@ pub(super) const ES: &[(&str, &str)] = &[
         "Las fórmulas que no se representaron se quedan como código: {list}.",
     ),
     ("mark.export.formula", "línea {line}, {error}"),
+    ("mark.export.no_typst", "Exportar a PDF necesita Typst: pone typst.exe junto a Green, define GREEN_TYPST o añade typst al PATH."),
     (
         "mark.export.folder_taken",
         "{name} ya existe; las imágenes necesitan esa carpeta.",
