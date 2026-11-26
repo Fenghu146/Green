@@ -137,6 +137,8 @@ jobs:
         run: scripts/vendor-gpui.sh check
       - shell: bash
         run: scripts/vendor-components.sh check
+      - shell: bash
+        run: scripts/vendor-crates.sh check
       # docs/compatibility.md names the pins and the patch counts; this says it
       # still does.
       - shell: bash

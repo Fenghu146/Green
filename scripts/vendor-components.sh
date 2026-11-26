@@ -78,6 +78,7 @@ for patch in $patches; do
 done
 
 if [ "$mode" = write ]; then
+  mkdir -p "$root/vendor"
   rm -rf "$root/vendor/$name"
   cp -R "$stage/vendor/$name" "$root/vendor/$name"
 elif ! diff -r --brief "$stage/vendor/$name" "$root/vendor/$name"; then

@@ -74,6 +74,7 @@ done
 failed=0
 while read -r name _; do
   if [ "$mode" = write ]; then
+    mkdir -p "$root/vendor"
     rm -rf "$root/vendor/$name"
     cp -R "$work/vendor/$name" "$root/vendor/$name"
   elif ! diff -r --brief "$work/vendor/$name" "$root/vendor/$name"; then

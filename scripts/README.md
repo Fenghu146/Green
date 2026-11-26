@@ -45,6 +45,7 @@ scripts/deny.sh [根] [检查...]  cargo-deny：安全公告、yanked、许可�
 scripts/notices.sh [根]          cargo-about 按 about.toml 与 about.hbs 重写 THIRD-PARTY-NOTICES.txt（去掉 CRLF，各平台字节一致）；ci.yml 重跑后 `git diff --exit-code` 核对
 scripts/vendor-gpui.sh [check|write]  vendor 的四个 gpui crate = crates.io 该版本 + patches/gpui 按序应用；check 重放后与 vendor/ 逐文件比对，版本从 Cargo.toml 读，hash 不符即说版本变了；补丁缺失、baseline 行与 pin 不一致也即败
 scripts/vendor-components.sh [check|write]  vendor/ely-gpui-components = Cargo.toml 的 pin，按 patches/ely-gpui-components/fc71e96-prune.txt 裁掉它自己仓库的路径，再按序应用该目录的补丁；check 同上逐文件比对
+scripts/vendor-crates.sh [check|write]  vendor 里另五个 crates.io 的 crate（accesskit 两个、mail-parser、pulldown-cmark、zbus）= 各版本的 tarball（hash 记在脚本里）+ patches/crates-io 的补丁，外加 vendor/Cargo.toml 那份工作区清单；check 同上逐文件比对
 scripts/compatibility.py [--check]  写 docs/compatibility.md 的版本与依赖两行（Green 版本、gpui 版本与补丁数、组件库 pin 与补丁数、裁掉的路径数）；--check 不符即败（ci.yml）
 scripts/panics.py [根]          非测试代码的 expect、unwrap、panic!、unreachable!（clippy 量，构建脚本、ely-mail-fake 除外）与 scripts/panics.tsv 逐条相符、各带理由，任一种类不多于 HEAD 的表；clippy 由它自设 `CARGO_CHECK_SHARED_DEPS=0`，编不过时打出编译错；`--sites` 列出本机各处
 cargo check --workspace

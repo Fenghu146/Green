@@ -6,8 +6,9 @@
 | --- | --- | --- |
 | `gpui/` | crates.io 的 `gpui-pre`，版本由 `Cargo.toml` 的 `gpui = { package = "gpui-pre", version = "=…" }` 一行决定 | `scripts/vendor-gpui.sh check\|write` |
 | `ely-gpui-components/` | 组件库的 pin，由 `Cargo.toml` 的 `ely-gpui-component = { git = …, rev = … }` 决定 | `scripts/vendor-components.sh check\|write` |
+| `crates-io/` | 五个从 crates.io 换进来的 crate 各自的版本与 tarball hash，写在 `scripts/vendor-crates.sh` 里 | `scripts/vendor-crates.sh check\|write` |
 
-两个脚本的 `check` 都是真重放：下载/克隆基线，按序应用全部补丁，再与 `vendor/` **逐文件比对**。
+三个脚本的 `check` 都是真重放：下载/克隆基线，按序应用全部补丁，再与 `vendor/` **逐文件比对**。
 不过就说不过，CI 每次跑。`write` 用同样的过程重写 `vendor/`。
 
 ## 每个补丁的头两行
@@ -47,6 +48,9 @@ pin 一致；不要在任何地方再抄一份版本号。
 - `ely-gpui-components/fc71e96-0001-marked.patch`：`==高亮==` 在 `tree` 读取里成为 `Mark` run。
 - `ely-gpui-components/fc71e96-prune.txt`：组件库自己仓库的文档、CI、api 快照等 266 个路径，
   vendor 不保留。它不是补丁，是 vendoring 政策；脚本按这份清单删，删完再应用补丁。
+- `crates-io/`：五个 crate 各一条 `0001`，都是上游行为不对的小修（对象路径回收、GFM 脚注链接、
+  引号内含 `@` 的地址、AT-SPI 缓存信号与注销）。文件名带 crate 与版本，`baseline:` 行带
+  tarball 的 sha256。
 
 `vendor/` 目前仍在 git 里（2718 个文件），两个 `check` 比对的就是它。改成「不入库、构建时重建」
 只需要把两个 `write` 接进构建之前，并 `git rm -r --cached vendor`——那是主线的决定。
