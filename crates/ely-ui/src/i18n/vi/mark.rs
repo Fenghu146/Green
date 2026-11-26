@@ -71,6 +71,7 @@ pub(super) const VI: &[(&str, &str)] = &[
     ("mark.export.diagrams", "Các sơ đồ không vẽ được vẫn ở dạng mã, tại các dòng {list}."),
     ("mark.export.formulas", "Các công thức không hiển thị được vẫn ở dạng mã: {list}."),
     ("mark.export.formula", "dòng {line}, {error}"),
+    ("mark.export.no_typst", "Xuất PDF cần Typst: đặt typst.exe cạnh Green, đặt biến GREEN_TYPST, hoặc thêm typst vào PATH."),
     ("mark.export.folder_taken", "{name} đã có ở đó; ảnh cần thư mục đó."),
     ("mark.copy.rich", "Sao chép dạng văn bản có định dạng"),
     ("mark.recovery.failed", "Văn bản chưa lưu của {name} chưa được giữ để khôi phục: {error}. Lần giữ gần nhất: {at}."),

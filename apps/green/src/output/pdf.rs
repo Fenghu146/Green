@@ -108,9 +108,11 @@ fn typst() -> io::Result<PathBuf> {
             return Ok(candidate);
         }
     }
-    Err(io::Error::new(
+    Err(ely_ipc::Worded::error(
         io::ErrorKind::NotFound,
-        "typst not found: put typst.exe beside green.exe, set GREEN_TYPST, or add it to PATH",
+        // Deleted with this CLI path once the export compiles Typst in-process.
+        "mark.export.no_typst",
+        &[],
     ))
 }
 

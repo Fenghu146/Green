@@ -71,6 +71,7 @@ pub(super) const FR: &[(&str, &str)] = &[
     ("mark.export.diagrams", "Les diagrammes qui ne se sont pas dessinés restent en code, aux lignes {list}."),
     ("mark.export.formulas", "Les formules qui ne se sont pas rendues restent en code : {list}."),
     ("mark.export.formula", "ligne {line}, {error}"),
+    ("mark.export.no_typst", "L’export PDF demande Typst : placez typst.exe à côté de Green, définissez GREEN_TYPST ou ajoutez typst au PATH."),
     ("mark.export.folder_taken", "{name} existe déjà ; les images ont besoin de ce dossier."),
     ("mark.copy.rich", "Copier en texte enrichi"),
     ("mark.recovery.failed", "Le texte non enregistré de {name} n’a pas été gardé pour la récupération : {error}. Dernière copie : {at}."),

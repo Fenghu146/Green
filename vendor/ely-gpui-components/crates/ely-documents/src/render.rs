@@ -22,6 +22,7 @@ use crate::{
 };
 
 mod blocks;
+pub use blocks::AlertTitles;
 mod found;
 mod math_text;
 mod point;

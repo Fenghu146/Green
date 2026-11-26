@@ -71,6 +71,7 @@ pub(super) const JA: &[(&str, &str)] = &[
     ("mark.export.diagrams", "描画できなかった図はコードのまま残しています。行: {list}。"),
     ("mark.export.formulas", "表示できなかった数式はコードのまま残しています: {list}。"),
     ("mark.export.formula", "{line} 行目、{error}"),
+    ("mark.export.no_typst", "PDF 書き出しには Typst が必要です：typst.exe を Green の隣に置くか、GREEN_TYPST を設定するか、PATH に typst を追加してください。"),
     ("mark.export.folder_taken", "{name} はすでにあります。画像にはそのフォルダーが必要です。"),
     ("mark.copy.rich", "リッチテキストとしてコピー"),
     ("mark.recovery.failed", "{name} の未保存のテキストを復元用に保持できませんでした: {error}。最後に保持したのは {at} です。"),

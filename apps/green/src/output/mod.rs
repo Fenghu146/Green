@@ -20,8 +20,7 @@ pub use plain::plain;
 
 /// The five alert titles, in the window's language, in `AlertKind`'s order.
 pub fn alerts(cx: &App) -> [String; 5] {
-    ["note", "tip", "important", "warning", "caution"]
-        .map(|kind| ely_ui::i18n::text(cx, &format!("mark.alert.{kind}"), &[]).to_string())
+    ely_gpui_component::documents::AlertTitles::current(cx).map(|title| title.to_string())
 }
 
 /// A page and what it could not carry.

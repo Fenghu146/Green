@@ -240,6 +240,12 @@ pub fn install_as(locale: &'static str, cx: &mut App) {
             .catalog("fr-FR", &fr)
             .catalog("de-DE", &de),
     );
+    // Alerts in a document speak the same language; the component library
+    // keeps GitHub's English until titles are set here.
+    cx.set_global(ely_gpui_component::documents::AlertTitles(
+        ["note", "tip", "important", "warning", "caution"]
+            .map(|kind| text(cx, &format!("mark.alert.{kind}"), &[])),
+    ));
 }
 
 /// Keys and messages of one language.

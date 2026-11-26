@@ -122,6 +122,7 @@ pub(super) const ES: &[(&str, &str)] = &[
         "Las fórmulas que no se representaron se quedan como código: {list}.",
     ),
     ("mark.export.formula", "línea {line}, {error}"),
+    ("mark.export.no_typst", "Exportar a PDF necesita Typst: pone typst.exe junto a Green, define GREEN_TYPST o añade typst al PATH."),
     (
         "mark.export.folder_taken",
         "{name} ya existe; las imágenes necesitan esa carpeta.",

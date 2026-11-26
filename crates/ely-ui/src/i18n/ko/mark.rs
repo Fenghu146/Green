@@ -71,6 +71,7 @@ pub(super) const KO: &[(&str, &str)] = &[
     ("mark.export.diagrams", "그려지지 않은 다이어그램은 코드로 남았습니다. 줄: {list}."),
     ("mark.export.formulas", "렌더링되지 않은 수식은 코드로 남았습니다: {list}."),
     ("mark.export.formula", "{line}줄, {error}"),
+    ("mark.export.no_typst", "PDF 내보내기에는 Typst가 필요합니다: typst.exe를 Green 옆에 두거나, GREEN_TYPST를 설정하거나, PATH에 typst를 추가하세요."),
     ("mark.export.folder_taken", "{name}이(가) 이미 있습니다. 그림에는 그 폴더가 필요합니다."),
     ("mark.copy.rich", "서식 있는 텍스트로 복사"),
     ("mark.recovery.failed", "{name}의 저장하지 않은 텍스트를 복구용으로 보관하지 못했습니다: {error}. 마지막 보관: {at}."),

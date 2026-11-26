@@ -71,6 +71,7 @@ pub(super) const DE: &[(&str, &str)] = &[
     ("mark.export.diagrams", "Diagramme, die sich nicht zeichnen ließen, bleiben Code, in den Zeilen {list}."),
     ("mark.export.formulas", "Formeln, die sich nicht darstellen ließen, bleiben Code: {list}."),
     ("mark.export.formula", "Zeile {line}, {error}"),
+    ("mark.export.no_typst", "PDF-Export braucht Typst: typst.exe neben Green legen, GREEN_TYPST setzen oder typst in den PATH aufnehmen."),
     ("mark.export.folder_taken", "{name} ist bereits vorhanden; die Bilder brauchen diesen Ordner."),
     ("mark.copy.rich", "Als formatierten Text kopieren"),
     ("mark.recovery.failed", "Der nicht gespeicherte Text von {name} wurde nicht zur Wiederherstellung gesichert: {error}. Zuletzt gesichert: {at}."),
