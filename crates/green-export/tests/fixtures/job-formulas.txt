@@ -1,7 +1,5 @@
-# 28 formulas of the user's assignment note, copied from
-# crates/green-math/tests/fixtures/job-formulas.txt. The boxed formula of bare
-# CJK is written with \text{}, as its five sibling boxes are: green-math leaves
-# bare CJK unquoted, which Typst cannot parse (reported to mainline).
+# The 28 formulas of the user's assignment note, verbatim; the reference copy
+# is crates/green-math/tests/fixtures/job-formulas.txt.
 2^{20}\text{ B}=1\text{ MB}
 \boxed{\text{ALU 16位；1MB；IR 16位；MAR 20位；MDR 8位}}
 2^4=16
@@ -9,7 +7,7 @@
 2^6=64
 64+64=128
 2^2=4
-\boxed{\text{R型 16种；I+J 128种；寄存器最多4个}}
+\boxed{R型\ 16种；I+J\ 128种；寄存器最多4个}
 0000\ 0001\ 1011\ 0010
 R[3]\leftarrow R[1]-R[2]
 R[1]=B052H,\quad R[2]=0008H
