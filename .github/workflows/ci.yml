@@ -133,8 +133,10 @@ jobs:
   # The release benchmark, off the PR path on purpose: its numbers move with
   # whatever else the machine is doing, and a gate that reddens under load
   # teaches people to ignore red. Design §5.4: CI runs the release benchmark
-  # alone. The debug run prints and never gates, and both benchmarks are
-  # #[ignore]d, so the ordinary test jobs see them as ignored, not failed.
+  # alone, and one at a time: gpui's shape counter is per process, so benches
+  # running in parallel count each other's shaping. The debug run prints and
+  # never gates, and both benchmarks are #[ignore]d, so the ordinary test jobs
+  # see them as ignored, not failed.
   bench:
     name: bench (release)
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -149,7 +151,7 @@ jobs:
       - shell: bash
         run: |
           set -o pipefail
-          cargo test --release -p green --features shape-count --locked -- --ignored --nocapture 2>&1 | tee bench.log
+          cargo test --release -p green --features shape-count --locked -- --ignored --nocapture --test-threads=1 2>&1 | tee bench.log
       # The number and the machine that took it, together: the tests print both.
       - if: always()
         shell: bash

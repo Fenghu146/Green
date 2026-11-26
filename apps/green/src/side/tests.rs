@@ -6,6 +6,17 @@ use gpui::{
 use super::Pane;
 use crate::desk::tests::{open, start};
 
+/// Opens `path` with the outline pane in front.
+fn outline_of(desk: &gpui::Entity<crate::desk::Desk>, path: &std::path::Path, cx: &mut VisualTestContext) {
+    open(desk, path, cx);
+    let side = desk.read_with(cx, |desk, _| desk.side.clone());
+    side.update(cx, |side, cx| {
+        side.pane = Pane::Outline;
+        cx.notify();
+    });
+    cx.run_until_parked();
+}
+
 #[gpui::test]
 fn a_long_outline_scrolls_to_its_last_heading(cx: &mut TestAppContext) {
     let (data, files) = (
@@ -13,7 +24,8 @@ fn a_long_outline_scrolls_to_its_last_heading(cx: &mut TestAppContext) {
         tempfile::tempdir().expect("files"),
     );
     let path = files.path().join("long.md");
-    let text: String = (0..100).map(|n| format!("# Heading {n}\n\n")).collect();
+    // Enough headings that the list draws only the rows in view.
+    let text: String = (0..300).map(|n| format!("# Heading {n}\n\n")).collect();
     std::fs::write(&path, text).expect("a file");
     let (desk, cx) = start(cx, data.path());
     open(&desk, &path, cx);
@@ -23,16 +35,16 @@ fn a_long_outline_scrolls_to_its_last_heading(cx: &mut TestAppContext) {
         cx.notify();
     });
     cx.run_until_parked();
-    let before = cx
+    let panel = cx
         .debug_bounds("mark-outline")
         .expect("the outline is drawn");
-    let window = cx.update(|window, _| window.viewport_size());
+    assert!(cx.debug_bounds("outline-row-0").is_some(), "the first row draws");
     assert!(
-        before.bottom() > window.height,
-        "the outline is longer than the window"
+        cx.debug_bounds("outline-row-299").is_none(),
+        "the last row waits off screen"
     );
-    let at = point(before.left() + px(20.0), px(300.0));
-    for _ in 0..20 {
+    let at = point(panel.left() + px(20.0), panel.top() + px(100.0));
+    for _ in 0..40 {
         cx.simulate_event(ScrollEvent {
             position: at,
             delta: ScrollDelta::Pixels(point(px(0.0), px(-1000.0))),
@@ -40,12 +52,9 @@ fn a_long_outline_scrolls_to_its_last_heading(cx: &mut TestAppContext) {
         });
         cx.run_until_parked();
     }
-    let after = cx
-        .debug_bounds("mark-outline")
-        .expect("the outline is drawn");
     assert!(
-        after.bottom() <= window.height,
-        "the last heading is in view: {after:?}"
+        cx.debug_bounds("outline-row-299").is_some(),
+        "the last heading is in view"
     );
 }
 
@@ -234,9 +243,9 @@ fn a_tab_copies_its_file_path(cx: &mut TestAppContext) {
     std::fs::write(&path, "# A\n").expect("a file");
     let (desk, cx) = start(cx, data.path());
     open(&desk, &path, cx);
-    // The tab strip sits just above the body.
+    // The tab strip sits above the body, past the 40 px toolbar.
     let body = cx.debug_bounds("shell-body").expect("the body");
-    right(point(px(30.0), body.top() - px(12.0)), cx);
+    right(point(px(30.0), body.top() - px(56.0)), cx);
     let kept = desk.read_with(cx, |desk, _| {
         let tab = desk.core.tabs.last().expect("a tab");
         tab.session.path().map(std::path::Path::to_path_buf).expect("a saved tab")
@@ -298,4 +307,181 @@ fn a_folder_the_filter_finds_opens_to_its_files(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("tree-chevron-notes/a.md").is_some(), "its file");
     assert!(cx.debug_bounds("tree-chevron-notes/sub").is_some(), "its folder");
+}
+
+#[gpui::test]
+fn the_outline_folds_itself_and_not_the_text(cx: &mut TestAppContext) {
+    let (data, files) = (
+        tempfile::tempdir().expect("data"),
+        tempfile::tempdir().expect("files"),
+    );
+    let path = files.path().join("a.md");
+    std::fs::write(&path, "# A\n\nalpha\n\n## B\n\nbeta\n\n## C\n\ngamma\n").expect("a file");
+    let (desk, cx) = start(cx, data.path());
+    outline_of(&desk, &path, cx);
+    let document = desk.read_with(cx, |desk, cx| {
+        desk.active_view().expect("a tab").read(cx).document().clone()
+    });
+    let chevron = cx.debug_bounds("outline-chevron-0").expect("A's triangle");
+    cx.simulate_click(chevron.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("outline-row-1").is_none(),
+        "A's headings fold in the panel"
+    );
+    assert!(
+        cx.debug_bounds("outline-chevron-0").is_some(),
+        "A keeps its triangle"
+    );
+    assert!(
+        !document.read_with(cx, |document, _| document.hidden(1)),
+        "the text keeps its own fold"
+    );
+    // The panel's folds are kept beside the text's, in the same file entry.
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    let kept = std::fs::read_to_string(data.path().join("view-state.json")).expect("the state");
+    assert!(
+        kept.contains("\"panel\"") && kept.contains("1|0|A"),
+        "{kept}"
+    );
+    // The triangle opens it again.
+    let chevron = cx.debug_bounds("outline-chevron-0").expect("A's triangle");
+    cx.simulate_mouse_move(chevron.center(), None, Modifiers::none());
+    cx.simulate_click(chevron.center(), Modifiers::none());
+    cx.run_until_parked();
+    let folded = desk.read_with(cx, |desk, cx| desk.side.read(cx).collapsed());
+    assert!(
+        cx.debug_bounds("outline-row-1").is_some(),
+        "B is back; the panel folds {folded:?}"
+    );
+}
+
+#[gpui::test]
+fn a_kept_panel_fold_comes_back_with_the_file(cx: &mut TestAppContext) {
+    let (data, files) = (
+        tempfile::tempdir().expect("data"),
+        tempfile::tempdir().expect("files"),
+    );
+    let path = files.path().join("a.md");
+    std::fs::write(&path, "# A\n\nalpha\n\n## B\n\nbeta\n").expect("a file");
+    let mut entries = serde_json::Map::new();
+    entries.insert(
+        crate::viewstate::key(&path),
+        serde_json::json!({ "panel": ["1|0|A"] }),
+    );
+    let state = serde_json::json!({ "files": entries });
+    std::fs::write(
+        data.path().join("view-state.json"),
+        serde_json::to_vec_pretty(&state).expect("json"),
+    )
+    .expect("the state");
+    let (desk, cx) = start(cx, data.path());
+    outline_of(&desk, &path, cx);
+    assert!(
+        cx.debug_bounds("outline-row-1").is_none(),
+        "the outline opens as it was folded"
+    );
+    let document = desk.read_with(cx, |desk, cx| {
+        desk.active_view().expect("a tab").read(cx).document().clone()
+    });
+    assert!(
+        !document.read_with(cx, |document, _| document.hidden(1)),
+        "the text's fold was its own"
+    );
+}
+
+#[gpui::test]
+fn the_outline_opens_from_ctrl_shift_o(cx: &mut TestAppContext) {
+    let (data, files) = (
+        tempfile::tempdir().expect("data"),
+        tempfile::tempdir().expect("files"),
+    );
+    let path = files.path().join("a.md");
+    std::fs::write(&path, "# A\n\ntext\n").expect("a file");
+    let (desk, cx) = start(cx, data.path());
+    open(&desk, &path, cx);
+    let side = desk.read_with(cx, |desk, _| desk.side.clone());
+    // As a reader starts: the side folded away.
+    cx.update(|_, app| ely_ui::settings::panels::show(true, false, app));
+    let focus = desk.read_with(cx, |desk, _| desk.core.focus.clone());
+    cx.update(|window, cx| window.focus(&focus, cx));
+    cx.simulate_keystrokes("secondary-shift-o");
+    assert!(cx.update(|_, app| ely_ui::settings::panels::shown(true, app)));
+    assert!(side.read_with(cx, |side, _| side.is_outline()));
+    cx.simulate_keystrokes("secondary-shift-o");
+    assert!(!cx.update(|_, app| ely_ui::settings::panels::shown(true, app)));
+}
+
+#[gpui::test]
+fn a_heading_in_the_outline_jumps_and_unfolds_the_text(cx: &mut TestAppContext) {
+    let (data, files) = (
+        tempfile::tempdir().expect("data"),
+        tempfile::tempdir().expect("files"),
+    );
+    let path = files.path().join("a.md");
+    std::fs::write(&path, "# A\n\nalpha\n\n## B\n\nbeta\n").expect("a file");
+    let (desk, cx) = start(cx, data.path());
+    outline_of(&desk, &path, cx);
+    let view = desk.read_with(cx, |desk, _| desk.active_view().expect("a tab"));
+    let document = view.read_with(cx, |view, _| view.document().clone());
+    desk.update_in(cx, |_, window, cx| {
+        document.update(cx, |document, cx| {
+            assert_eq!(document.toggle_fold_at(0, window, cx), Some(true));
+        });
+    });
+    cx.run_until_parked();
+    assert!(
+        document.read_with(cx, |document, _| document.hidden(1)),
+        "the text folds A"
+    );
+    // A's title is in the panel; B's row shows because the panel is open.
+    let row = cx.debug_bounds("outline-row-1").expect("B's row");
+    cx.simulate_click(point(row.left() + px(80.0), row.center().y), Modifiers::none());
+    cx.run_until_parked();
+    assert!(
+        !document.read_with(cx, |document, _| document.hidden(1)),
+        "the jump unfolds the text's ancestors"
+    );
+    assert_eq!(
+        view.read_with(cx, |view, cx| view.place(cx).line),
+        4,
+        "the caret lands on B"
+    );
+}
+
+#[gpui::test]
+#[ignore = "benchmark: run by hand on a quiet machine, e.g. cargo test --release -p green -- --ignored --nocapture --test-threads=1"]
+fn a_long_outline_opens_quickly(cx: &mut TestAppContext) {
+    let (data, files) = (
+        tempfile::tempdir().expect("data"),
+        tempfile::tempdir().expect("files"),
+    );
+    let path = files.path().join("long.md");
+    let text: String = (0..3000).map(|n| format!("# H{n}\n\ntext\n\n")).collect();
+    std::fs::write(&path, text).expect("a file");
+    let (desk, cx) = start(cx, data.path());
+    open(&desk, &path, cx);
+    let side = desk.read_with(cx, |desk, _| desk.side.clone());
+    let start = std::time::Instant::now();
+    side.update(cx, |side, cx| {
+        side.pane = Pane::Outline;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let took = start.elapsed();
+    println!("outline: 3000 headings opened in {took:?}, {}", crate::bench::machine());
+    // Debug bounds exist only in debug builds.
+    if cfg!(debug_assertions) {
+        assert!(cx.debug_bounds("outline-row-0").is_some(), "the tree draws");
+        assert!(
+            cx.debug_bounds("outline-row-2999").is_none(),
+            "only the rows in view draw"
+        );
+    }
+    // Only a release build holds design §9; a debug build's number is printed.
+    if !cfg!(debug_assertions) {
+        let goal = std::time::Duration::from_millis(100);
+        assert!(took < goal, "3000 headings took {took:?}, over {goal:?}");
+    }
 }

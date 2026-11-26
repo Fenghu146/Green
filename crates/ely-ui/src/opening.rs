@@ -186,6 +186,17 @@ pub fn install_no_launch_files(cx: &mut App) {
     cx.set_global(Queue(queue));
 }
 
+/// These files asked at launch, for a capture that has no start to announce them.
+#[cfg(feature = "capture")]
+pub fn install_launch_files(cx: &mut App, files: Vec<PathBuf>) {
+    let (queue, asked) = mpsc::unbounded();
+    for path in files {
+        queue.unbounded_send((path, None)).ok();
+    }
+    cx.set_global(Asked(Some(asked)));
+    cx.set_global(Queue(queue));
+}
+
 /// Files asked before the app started: arguments and Finder's.
 pub fn launch_files(cx: &mut App) -> Vec<PathBuf> {
     let asked = cx.global_mut::<Asked>().0.as_mut();
@@ -377,7 +388,7 @@ mod home_tests {
         let (_, _, asker) = homed(main, cx);
         let refused = ask(&asker, "docs");
         cx.run_until_parked();
-        assert_eq!(refused.try_recv(), Ok(Err("ElyMark takes no requests".into())));
+        assert_eq!(refused.try_recv(), Ok(Err("Green takes no requests".into())));
         cx.update(|cx| on_ask(cx, |ask, _| {
             let echo = ask.request.to_uppercase();
             ask.answer(Ok(echo))

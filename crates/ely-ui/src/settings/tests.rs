@@ -368,7 +368,7 @@ fn the_status_names_this_version_and_the_check(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let line = |checked| super::window::status(AppId::Mark, &checked, cx).to_string();
         let newer = line(Some(Checked::Newer(semver::Version::new(9, 1, 0))));
-        assert!(newer.contains("ElyMark") && newer.contains(env!("CARGO_PKG_VERSION")) && newer.contains("9.1.0"), "{newer}");
+        assert!(newer.contains("Green") && newer.contains(env!("CARGO_PKG_VERSION")) && newer.contains("9.1.0"), "{newer}");
         let failed = line(Some(Checked::Failed("no route".into())));
         assert!(failed.contains("no route"), "{failed}");
         assert_ne!(line(None), line(Some(Checked::Latest)));

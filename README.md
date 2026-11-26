@@ -35,17 +35,14 @@ target/debug/green.exe path/to/note.md
 
 `==` 不是 CommonMark/GFM 语法：用 Typora、Obsidian 以外的编辑器打开会看到原始 `==`。这是有意为之——Green 不往文件里写自有标记，折叠、大纲都只存视图状态。
 
-## 资产
+## 资产与许可
 
-- 图标：`assets/icon.svg`（母版）与 `assets/icon-small.svg`（≤32 px 变体），用户提供的原创素材，随本仓库以 GPL-3.0-or-later 发布；`scripts/icon.py` 生成 `assets/icons/green.ico` 与 `green.png`；**图标产物已提交，构建不需要脚本**，只有改图时才重跑，且依赖本机 Chrome/Edge 栅格化。
-- 字体：Noto Sans CJK SC，SIL OFL 1.1，见 `LICENSES/OFL-1.1.txt`。
-- 组件库：`vendor/ely-gpui-components` 是 Ely-GPUI-Components（MIT）的 fork，声明见 `LICENSES/Ely-GPUI-Components-MIT.txt`。
+Green 自有代码以 **GPL-3.0-or-later** 发布，全文见 [`LICENSES/GPL-3.0.txt`](LICENSES/GPL-3.0.txt)。
 
-## 许可
-
-Green 自有代码以 **GPL-3.0-or-later** 发布，全文见 [`LICENSE`](LICENSES/GPL-3.0.txt)。
-
-- 基座 [ElyOffice](https://github.com/ELY-Open-Source/ElyOffice)（commit `3ba2adc`）为 MIT，见 [`LICENSES/ElyOffice-MIT.txt`](LICENSES/ElyOffice-MIT.txt)。
-- 界面组件 [Ely-GPUI-Components](https://github.com/ELY-Open-Source/Ely-GPUI-Components)（`fc71e96`）为 MIT，见 [`LICENSES/Ely-GPUI-Components-MIT.txt`](LICENSES/Ely-GPUI-Components-MIT.txt)。
-- 随包字体 Noto Sans CJK SC 为 SIL OFL 1.1，见 [`LICENSES/OFL-1.1.txt`](LICENSES/OFL-1.1.txt)；不单独售卖字体，字体文件不改名不改字形。
-- 其余依赖的许可见 [`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt)（由 `cargo-about` 生成，S6 复核）。
+- **图标**：`assets/icon.svg`（母版）与 `assets/icon-small.svg`（≤32 px 变体），用户提供的原创素材，随本仓库以 GPL-3.0-or-later 发布；`scripts/icon.py` 生成 `assets/icons/green.ico` 与 `green.png`。图标产物已提交，构建不需要脚本。
+- **字体**：随包 Noto Sans CJK SC Regular/Bold，SIL OFL 1.1，见 [`LICENSES/OFL-1.1.txt`](LICENSES/OFL-1.1.txt)；不单独售卖字体，字体文件不改名不改字形。`docs/LICENSE-AUDIT.md` 记着当前缺口：Noto Sans Math 与 Noto Sans Mono 尚未随包，字体族的 OFL 版权行也还没按族拆开。
+- **组件库**：`vendor/ely-gpui-components` 是 [Ely-GPUI-Components](https://github.com/ELY-Open-Source/Ely-GPUI-Components)（`fc71e96`，MIT）的 fork，声明见 [`LICENSES/Ely-GPUI-Components-MIT.txt`](LICENSES/Ely-GPUI-Components-MIT.txt)。
+- **基座**：[ElyOffice](https://github.com/ELY-Open-Source/ElyOffice)（commit `3ba2adc`）为 MIT，见 [`LICENSES/ElyOffice-MIT.txt`](LICENSES/ElyOffice-MIT.txt)。
+- **示例插件**：`examples/plugins/csv`（Python）、`tsv`（Python）、`log`（Node）是本项目代码，GPL-3.0-or-later；它们作为独立进程运行，不编进 `green.exe`。第三方插件只经 JSON 与 Green 通信，按工程判断通常不构成衍生作品（不是法律意见，详见审计）。
+- **第三方依赖**：`green.exe` 链接的 573 个第三方 crate 的许可证见 [`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt)（`cargo about generate packaging/notices.hbs` 生成）；逐个核对、白名单与需要说明的项见 [`docs/LICENSE-AUDIT.md`](docs/LICENSE-AUDIT.md)。
+- **便携包**：`script/package-windows.ps1` 出 `dist/Green-<版本>-windows-x86_64.zip`，含 `green.exe`、`fonts/`、图标、`LICENSE`、`LICENSES/`、`THIRD-PARTY-NOTICES.txt`、`README.txt` 与 `data/`；不含安装器、签名和自动更新。

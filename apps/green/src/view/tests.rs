@@ -6,7 +6,7 @@ use super::{MarkView, Mode, Reported};
 use crate::engine::{Text, mark};
 use crate::text::Source;
 
-fn open<'a>(
+pub(super) fn open<'a>(
     text: &str,
     cx: &'a mut TestAppContext,
 ) -> (Entity<MarkView>, &'a mut VisualTestContext) {
@@ -30,7 +30,7 @@ fn typing_reaches_the_text_the_shell_saves(cx: &mut TestAppContext) {
     let outline: Vec<(usize, String, usize)> = view.read_with(cx, |view, cx| {
         view.outline(cx)
             .into_iter()
-            .map(|heading| (heading.level, heading.title, heading.line))
+            .map(|heading| (usize::from(heading.depth), heading.title, heading.line))
             .collect()
     });
     assert_eq!(outline, [(1, "A".to_string(), 0)]);
@@ -301,4 +301,88 @@ fn a_wheel_beside_the_text_scrolls_it(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     assert!(top(cx) > before, "the margin's wheel moved the text");
+}
+
+#[gpui::test]
+fn a_folded_heading_hides_its_section_and_leaves_the_text(cx: &mut TestAppContext) {
+    let text = "# A\n\nalpha\n\n## B\n\nbeta\n\n# C\n\ngamma\n";
+    let (view, cx) = open(text, cx);
+    view.update_in(cx, |view, window, cx| {
+        let document = view.document().clone();
+        document.update(cx, |document, cx| {
+            assert_eq!(document.toggle_fold_at(0, window, cx), Some(true));
+            assert!(document.hidden(1) && document.hidden(2) && document.hidden(3));
+            assert!(!document.hidden(4), "the next level-one heading stays");
+            assert_eq!(document.folded_keys(), ["1|0|A"]);
+            // A second press unfolds it.
+            assert_eq!(document.toggle_fold_at(0, window, cx), Some(false));
+            assert!(!document.hidden(1) && !document.hidden(3));
+            assert!(document.folded_keys().is_empty());
+        });
+    });
+    let kept = view.read_with(cx, |view, _| {
+        view.doc.lock().expect("the text lock").current.clone()
+    });
+    assert_eq!(kept, text, "folding never touches the text");
+}
+
+#[gpui::test]
+fn a_fold_hides_every_level_below_it_down_to_a_same_level_heading(cx: &mut TestAppContext) {
+    // One block a heading, one its text: 0 # A, 1 ## B, 2 alpha, 3 #### D,
+    // 4 deep, 5 ### E, 6 less deep, 7 ## F, 8 next, 9 # G, 10 gamma.
+    let text = "# A\n\n## B\n\nalpha\n\n#### D\n\ndeep\n\n### E\n\nless deep\n\n## F\n\nnext\n\n# G\n\ngamma\n";
+    let (view, cx) = open(text, cx);
+    view.update_in(cx, |view, window, cx| {
+        let document = view.document().clone();
+        document.update(cx, |document, cx| {
+            assert_eq!(document.toggle_fold(3, window, cx), Some(true), "#### D");
+            assert!(document.hidden(4), "its text folds");
+            assert!(!document.hidden(5), "a higher level stays");
+            assert_eq!(document.toggle_fold(3, window, cx), Some(false));
+            // ## B folds the #### D under it and every level between.
+            assert_eq!(document.toggle_fold(1, window, cx), Some(true), "## B");
+            assert!(document.hidden(2) && document.hidden(3) && document.hidden(5));
+            assert!(!document.hidden(7), "## F stays");
+            assert!(!document.hidden(9), "# G stays");
+        });
+    });
+}
+
+#[gpui::test]
+fn a_fold_survives_a_mode_switch(cx: &mut TestAppContext) {
+    let (view, cx) = open("# A\n\nalpha\n", cx);
+    view.update_in(cx, |view, window, cx| {
+        let document = view.document().clone();
+        document.update(cx, |document, cx| {
+            assert_eq!(document.toggle_fold_at(0, window, cx), Some(true));
+        });
+        view.switch(Mode::Source, window, cx);
+        view.switch(Mode::Visual, window, cx);
+    });
+    cx.run_until_parked();
+    let hidden = view.read_with(cx, |view, cx| {
+        let document = view.document().read(cx);
+        (document.hidden(1), document.folded_keys())
+    });
+    assert_eq!(hidden, (true, vec!["1|0|A".to_string()]));
+}
+
+#[gpui::test]
+fn the_outline_is_a_tree_of_headings_with_plain_titles(cx: &mut TestAppContext) {
+    let text = "# A $x^2$ and **bold**\n\na paragraph\n\n- a list item\n\n## B\n\n### C\n\nmore\n";
+    let (view, cx) = open(text, cx);
+    let tree = view.read_with(cx, |view, cx| view.outline(cx));
+    let shape: Vec<(u8, &str, Option<usize>, bool)> = tree
+        .iter()
+        .map(|heading| (heading.depth, heading.title.as_str(), heading.parent, heading.opens))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (1, "A x^2 and bold", None, true),
+            (2, "B", Some(0), true),
+            (3, "C", Some(1), false),
+        ],
+        "headings only, marks gone, levels a tree"
+    );
 }

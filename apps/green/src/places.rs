@@ -39,6 +39,10 @@ impl Desk {
         if path.is_dir() {
             return self.open_folder(path, cx);
         }
+        // A plugin's file opens as its blocks (design §3).
+        if crate::plugins::intercept(&path, cx) {
+            return;
+        }
         // A shown file only takes focus; the list still learns.
         let shown = self.core.shared.get().sessions.is_open(&path).unwrap_or(false);
         self.open_file(path.clone(), cx);
