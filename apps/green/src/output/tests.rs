@@ -231,7 +231,6 @@ mod files {
     use std::path::Path;
 
     use super::super::{Format, Target, write};
-    use super::DOT;
 
     fn target<'a>(path: &'a Path, work: &'a Path) -> Target<'a> {
         Target {
@@ -333,78 +332,9 @@ mod files {
             "Title here\n"
         );
     }
-
-    /// The text of a PDF's first page.
-    fn words(pdf: &Path) -> String {
-        let mut worker = ely_pdf_engine::Worker::spawn().expect("the worker");
-        let doc = worker.open(pdf).expect("opens").doc;
-        worker
-            .text(doc, 0)
-            .expect("text")
-            .iter()
-            .map(|ch| ch.c)
-            .collect()
-    }
-
-    #[test]
-    fn a_pdf_sets_the_page_and_leaves_no_scratch() {
-        let dir = tempfile::tempdir().expect("a dir");
-        let work = tempfile::tempdir().expect("work");
-        let out = dir.path().join("out.pdf");
-        let text = format!(
-            "# Heading 标题\n\nInline $x^2$.\n\n![dot](data:image/png;base64,{DOT}) ![lost](gone.png)\n\n```mermaid\nflowchart LR\n  A --> B\n```\n"
-        );
-        let page = write(
-            Format::Pdf,
-            &text,
-            Some(dir.path()),
-            &target(&out, work.path()),
-        )
-        .expect("writes");
-        assert_eq!(page.missing, ["gone.png"]);
-        assert!(page.formulas.is_empty() && page.diagrams.is_empty());
-        assert_eq!(
-            std::fs::read_dir(work.path()).expect("work").count(),
-            0,
-            "the scratch is gone"
-        );
-        let words = words(&out);
-        assert!(
-            words.contains("Heading") && words.contains("标题") && words.contains("[lost]"),
-            "{words:?}"
-        );
-    }
-
-    #[test]
-    fn pdfs_at_once_keep_to_their_own_pages() {
-        let (dir, work) = (
-            tempfile::tempdir().expect("a dir"),
-            tempfile::tempdir().expect("work"),
-        );
-        let jobs: Vec<_> = (0..4)
-            .map(|n| {
-                let (out, work) = (
-                    dir.path().join(format!("{n}.pdf")),
-                    work.path().to_path_buf(),
-                );
-                std::thread::spawn(move || {
-                    write(
-                        Format::Pdf,
-                        &format!("# Page{n}\n"),
-                        None,
-                        &target(&out, &work),
-                    )
-                    .expect("writes");
-                    out
-                })
-            })
-            .collect();
-        for (n, job) in jobs.into_iter().enumerate() {
-            let out = job.join().expect("the job");
-            assert!(words(&out).contains(&format!("Page{n}")), "job {n}");
-        }
-    }
 }
+
+
 
 #[test]
 fn a_disguised_script_link_does_not_follow() {

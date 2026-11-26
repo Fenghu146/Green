@@ -56,6 +56,10 @@ pub struct Desk {
     pub keeping: crate::restore::Keeping,
     pub look: crate::look::Look,
     pub look_file: PathBuf,
+    /// Folds kept per file: the text's headings and the outline's.
+    pub views: crate::viewstate::Views,
+    /// The block style the menus were last built for.
+    pub menu_style: Option<ely_gpui_component::documents::TargetBlock>,
     /// Git's word on the shown file, and which tab asked.
     /// The find box, while open.
     pub(crate) finding: Option<crate::finding::Find>,
@@ -85,6 +89,11 @@ impl Host for Desk {
     /// A quit records the open tabs first.
     fn quitting(&mut self, cx: &mut Context<Self>) {
         self.leave(cx);
+        if let Err(error) = self.views.flush() {
+            log::error!("mark: the view state did not save on quit: {error}");
+            let said = text(cx, "office.error.engine", &[("error", &error.to_string())]);
+            self.toast(said, ely_gpui_component::primitives::Severity::Danger, cx);
+        }
     }
 
     /// A quit or close stopped: the kept list follows again.
@@ -131,6 +140,7 @@ impl Host for Desk {
         if self.finding.is_some() {
             self.count(cx);
         }
+        self.sync_menus(cx);
         let path = self
             .tab(id)
             .and_then(|tab| tab.session.path().map(PathBuf::from));
@@ -139,6 +149,12 @@ impl Host for Desk {
                 view.update(cx, |view, cx| view.moved(folder.to_path_buf(), cx));
             }
             self.track_recent(id, &path, cx);
+            // This file's folds come in once; its changes go back out.
+            if !view.read(cx).loaded_folds() {
+                let folded = self.views.folded(&path);
+                view.update(cx, |view, cx| view.set_folds(folded, cx));
+            }
+            self.remember_view(id, cx);
             if self
                 .going
                 .as_ref()
@@ -172,6 +188,8 @@ pub(crate) fn open_in(
     let skipped = crate::plugins::start(&data, cx);
     let recent_file = data.join("recent.json");
     let look_file = data.join("look.json");
+    // Folds are read beside the recents; an unreadable file is reported.
+    let (views, views_unread) = crate::viewstate::Views::start(&data);
     // An unreadable look is reported; the default shows.
     let (look, look_unread) = match crate::look::load(&look_file) {
         Ok(look) => (look, None),
@@ -207,6 +225,8 @@ pub(crate) fn open_in(
             keeping,
             look: look.clone(),
             look_file,
+            views,
+            menu_style: None,
             finding: None,
             copying: None,
             tab_asked: None,
@@ -214,7 +234,7 @@ pub(crate) fn open_in(
     });
     crate::remote::listen(&desk, cx);
     crate::look::settings_rows(desk.downgrade(), cx);
-    let menus = crate::keys::menus(&look, cx);
+    let menus = crate::keys::menus(&look, None, cx);
     let root = ely_ui::document_root(
         app,
         desk.clone().into(),
@@ -271,6 +291,11 @@ pub(crate) fn open_in(
             let said = text(cx, "office.error.engine", &[("error", &error.to_string())]);
             desk.toast(said, ely_gpui_component::primitives::Severity::Danger, cx);
         }
+        if let Some(error) = views_unread {
+            log::error!("mark: the view state did not read: {error}");
+            let said = text(cx, "office.error.engine", &[("error", error.as_str())]);
+            desk.toast(said, ely_gpui_component::primitives::Severity::Danger, cx);
+        }
         if let Some(error) = unread {
             log::error!("mark: the recent list did not read: {error}");
             let said = text(cx, "office.error.engine", &[("error", &error.to_string())]);
@@ -312,6 +337,78 @@ pub(crate) fn open_in(
 impl Desk {
     pub fn active_view(&self) -> Option<Entity<MarkView>> {
         self.active_tab().map(|tab| tab.view.clone())
+    }
+
+    /// Rebuilds the menus when the caret's block style changes, so the
+    /// paragraph menu ticks the one it is in.
+    pub(crate) fn sync_menus(&mut self, cx: &mut Context<Self>) {
+        let style = self
+            .active_view()
+            .and_then(|view| view.read(cx).block_style(cx));
+        if style == self.menu_style {
+            return;
+        }
+        self.menu_style = style;
+        let menus = crate::keys::menus(&self.look, style, cx);
+        ely_ui::set_document_menus(
+            ely_platform::AppId::Mark,
+            &ely_ui::commands::RENAMING,
+            menus,
+            cx,
+        );
+    }
+
+    /// The shown file's path, when it has one.
+    pub(crate) fn path_of(&self, id: Option<u64>) -> Option<PathBuf> {
+        self.tab(id?).and_then(|tab| tab.session.path().map(PathBuf::from))
+    }
+
+    /// Takes tab `id`'s folds, and the outline's when it is in front.
+    pub(crate) fn remember_view(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(path) = self.path_of(Some(id)) else {
+            return;
+        };
+        let Some(view) = self.tab(id).map(|tab| tab.view.clone()) else {
+            return;
+        };
+        let folded = view.read(cx).folds(cx);
+        let mut changed = self.views.set_folded(&path, folded);
+        // The side's folds belong to the tab it has already taken up.
+        if self.core.active() == Some(id) && self.side.read(cx).seen() == Some(id) {
+            let panel = self.side.read(cx).collapsed();
+            changed |= self.views.set_panel(&path, panel);
+        }
+        if changed {
+            self.views.settle(cx);
+        }
+    }
+
+    /// Takes the outline's folds for the file in front.
+    pub(crate) fn remember_panel(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.path_of(self.core.active()) else {
+            return;
+        };
+        let panel = self.side.read(cx).collapsed();
+        if self.views.set_panel(&path, panel) {
+            self.views.settle(cx);
+        }
+    }
+
+    /// A view-state write came back; a failure is said.
+    pub(crate) fn views_written(
+        &mut self,
+        moves: u64,
+        written: std::io::Result<()>,
+        cx: &mut Context<Self>,
+    ) {
+        match written {
+            Ok(()) => self.views.written(moves),
+            Err(error) => {
+                log::error!("mark: the view state did not save: {error}");
+                let said = text(cx, "office.error.engine", &[("error", &error.to_string())]);
+                self.toast(said, ely_gpui_component::primitives::Severity::Danger, cx);
+            }
+        }
     }
 
     /// Asks for files; each opens in its own tab.

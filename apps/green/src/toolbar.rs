@@ -63,14 +63,13 @@ impl Desk {
             .child(press("green-underline", IconName::Underline, ment("mark.format.underline"), Box::new(blocks::Underline)))
             .child(press("green-strike", IconName::Strikethrough, ment("mark.format.strike"), Box::new(blocks::Strike)));
 
+        let style = self
+            .active_view()
+            .and_then(|view| view.read(cx).block_style(cx));
         let paragraph = DropdownMenu::new(
             "green-paragraph",
             ment("mark.menu.paragraph"),
-            Menu::new()
-                .item(row(ment("mark.block.paragraph"), Box::new(blocks::Paragraph)))
-                .item(row(ment("mark.block.h1"), Box::new(blocks::Heading1)))
-                .item(row(ment("mark.block.h2"), Box::new(blocks::Heading2)))
-                .item(row(ment("mark.block.h3"), Box::new(blocks::Heading3))),
+            blocks::paragraph_dropdown(style, cx),
         )
         .variant(ButtonVariant::Ghost);
 
@@ -82,11 +81,14 @@ impl Desk {
             "green-insert",
             ment("mark.tool.insert"),
             Menu::new()
-                .item(row(ment("mark.format.image"), Box::new(blocks::InsertImage)))
                 .item(row(ment("mark.table.insert"), Box::new(tools::InsertTable)))
+                .item(row(ment("mark.format.link"), Box::new(blocks::Hyperlink)))
+                .item(row(ment("mark.format.image"), Box::new(blocks::InsertImage)))
+                .separator()
                 .item(row(ment("mark.block.code"), Box::new(blocks::CodeFences)))
+                .item(row(ment("mark.block.math"), Box::new(blocks::MathBlock)))
                 .item(row(ment("mark.block.rule"), Box::new(blocks::Rule)))
-                .item(row(ment("mark.block.math"), Box::new(blocks::MathBlock))),
+                .item(row(ment("mark.block.quote"), Box::new(blocks::Quote))),
         )
         .icon(IconName::Plus);
 

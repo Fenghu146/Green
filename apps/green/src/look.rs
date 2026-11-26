@@ -144,7 +144,7 @@ impl Desk {
             self.toast(said, Severity::Danger, cx);
         }
         self.apply_look(cx);
-        let menus = crate::keys::menus(&self.look, cx);
+        let menus = crate::keys::menus(&self.look, self.menu_style, cx);
         ely_ui::set_document_menus(
             ely_platform::AppId::Mark,
             &ely_ui::commands::RENAMING,

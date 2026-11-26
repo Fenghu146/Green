@@ -674,7 +674,8 @@ impl WindowTextSystem {
     /// Note that this method can only shape a single line of text. It will panic
     /// if the text contains newlines. If you need to shape multiple lines of text,
     /// use [`Self::shape_text`] instead.
-    /// Green: lines shaped so far, when the `shape-count` feature is on.
+    /// Green: lines actually shaped so far, when the `shape-count` feature is on.
+    /// A cache hit is not shaping; only a new line layout counts.
     #[cfg(feature = "shape-count")]
     pub fn shaped_lines() -> usize {
         SHAPED_LINES.load(std::sync::atomic::Ordering::Relaxed)
@@ -684,6 +685,14 @@ impl WindowTextSystem {
     #[cfg(feature = "shape-count")]
     pub fn reset_shaped_lines() {
         SHAPED_LINES.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Green: keeps the lines drawn in the last frame, for a fold that hides them.
+    ///
+    /// Unfolding looks in this kept set before shaping, so text that was on
+    /// screen when it folded is laid out again only from its kept layout.
+    pub fn keep_frame(&self) {
+        self.line_layout_cache.keep_frame()
     }
 
     pub fn shape_line(
@@ -697,8 +706,6 @@ impl WindowTextSystem {
             text.find('\n').is_none(),
             "text argument should not contain newlines"
         );
-        #[cfg(feature = "shape-count")]
-        SHAPED_LINES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
         for run in runs {

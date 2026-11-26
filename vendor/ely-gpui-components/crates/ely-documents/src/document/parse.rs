@@ -7,7 +7,7 @@ use crate::{
     tree::{DocumentHeading, Node, Reader},
 };
 
-use super::TargetBlock;
+use super::{TargetBlock, fold};
 
 /// A top-level block: its source, and what it draws.
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +25,10 @@ pub(crate) struct Parsed {
     pub text: String,
     pub blocks: Vec<Block>,
     pub headings: Vec<DocumentHeading>,
+    /// Each heading's key, as a file's view state keeps it.
+    pub keys: Vec<String>,
+    /// Each heading's parent, by index in `headings`.
+    pub parents: Vec<Option<usize>>,
 }
 
 /// `text` read whole; every byte is in or between blocks.
@@ -52,10 +56,13 @@ pub(crate) fn parsed(text: &str) -> Parsed {
             }
         })
         .collect();
+    let (keys, parents) = fold::keys(&reader.headings);
     Parsed {
         text: text.to_string(),
         blocks,
         headings: reader.headings,
+        keys,
+        parents,
     }
 }
 

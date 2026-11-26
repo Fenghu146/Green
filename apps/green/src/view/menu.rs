@@ -389,14 +389,14 @@ fn wraps(window: &Window, cx: &App) -> Vec<MenuItem> {
 fn paragraph(window: &Window, cx: &App) -> Menu {
     let row = |key, action: Box<dyn Action>| run(said(key, cx), action, window, cx);
     Menu::new()
+        .item(row("mark.block.paragraph", Box::new(b::Paragraph)))
+        .separator()
         .item(row("mark.block.h1", Box::new(b::Heading1)))
         .item(row("mark.block.h2", Box::new(b::Heading2)))
         .item(row("mark.block.h3", Box::new(b::Heading3)))
         .item(row("mark.block.h4", Box::new(b::Heading4)))
         .item(row("mark.block.h5", Box::new(b::Heading5)))
         .item(row("mark.block.h6", Box::new(b::Heading6)))
-        .separator()
-        .item(row("mark.block.paragraph", Box::new(b::Paragraph)))
 }
 
 fn table(window: &Window, cx: &App) -> Menu {
