@@ -49,11 +49,34 @@ fn the_assignment_note_stays_under_two_megabytes() {
     );
     assert_eq!(export.audit.images, 0);
     assert!(export.audit.compressed);
-    assert!(!export.audit.fonts.is_empty());
     assert!(export.warnings.is_empty(), "{:?}", export.warnings);
     assert!(
         export.elapsed <= Duration::from_secs(10),
         "{:?}",
         export.elapsed
+    );
+    // No font drift: every face in the PDF comes from assets/fonts, and math is
+    // ours (Noto Sans Math), not whatever Typst ships inside the executable.
+    const BUNDLED: &[&str] = &[
+        "NotoSansCJKsc-Regular",
+        "NotoSansCJKsc-Bold",
+        "NotoSansMath-Regular",
+    ];
+    for font in &export.audit.fonts {
+        assert!(
+            BUNDLED.contains(&font.name.as_str()),
+            "{} is not a bundled face: {:?}",
+            font.name,
+            export.audit.fonts
+        );
+    }
+    assert!(
+        export
+            .audit
+            .fonts
+            .iter()
+            .any(|font| font.name == "NotoSansMath-Regular"),
+        "math fell back to another font: {:?}",
+        export.audit.fonts
     );
 }

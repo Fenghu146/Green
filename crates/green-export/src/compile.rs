@@ -48,8 +48,10 @@ impl Compiler for Cli {
             .arg(&self.fonts)
             .arg("--root")
             .arg(&self.root)
-            // Only the bundled faces: a system font would be embedded whole.
+            // Only the bundled faces: a system font or Typst's own assets would
+            // be embedded whole, and the PDF would not match the editor.
             .arg("--ignore-system-fonts")
+            .arg("--ignore-embedded-fonts")
             .arg("-")
             .arg(out)
             .current_dir(&self.root)

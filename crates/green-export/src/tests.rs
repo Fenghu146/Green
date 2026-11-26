@@ -76,7 +76,7 @@ fn a_paragraph_that_starts_with_a_number_keeps_it() {
 fn marks_the_bundled_fonts_lack_become_symbols() {
     assert_eq!(
         body(&[paragraph("✅ 好了 ❌ 不行")]),
-        "#sym.checkmark 好了 #sym.crossmark 不行\n\n"
+        "#sym.checkmark 好了 #sym.times 不行\n\n"
     );
 }
 
