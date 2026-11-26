@@ -4040,6 +4040,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "green-export"
+version = "0.1.17"
+dependencies = [
+ "anyhow",
+ "green-math",
+ "log",
+ "lopdf",
+ "sha2 0.10.9",
+ "ttf-parser",
+]
+
+[[package]]
 name = "green-math"
 version = "0.1.17"
 

@@ -1,0 +1,30 @@
+# The 28 formulas of the user's assignment note, verbatim; the reference copy
+# is crates/green-math/tests/fixtures/job-formulas.txt.
+2^{20}\text{ B}=1\text{ MB}
+\boxed{\text{ALU 16位；1MB；IR 16位；MAR 20位；MDR 8位}}
+2^4=16
+2^6=64
+2^6=64
+64+64=128
+2^2=4
+\boxed{R型\ 16种；I+J\ 128种；寄存器最多4个}
+0000\ 0001\ 1011\ 0010
+R[3]\leftarrow R[1]-R[2]
+R[1]=B052H,\quad R[2]=0008H
+B052H-0008H=B04AH
+R[3]=B04AH,\quad \text{不溢出}
+R[3]\leftarrow R[1]\times R[2]
+B052H=-1F4EH=-(8142)_{10}
+(-8142)\times 8=-65136
+-65136<-32768
+B052H\times 0008H
+B052H\cdot 8:\ B052H=1011\ 0000\ 0101\ 0010
+B052H\times 8=8290H\ (\text{取低16位，符号结果截断})
+R[1]\times R[2]=(-8142)\times8=-65136
+-65136\bmod 65536=400H
+R[3]=0400H,\quad \text{溢出}
+\boxed{\text{符号扩展}}
+\boxed{\text{J型（也可采用I型）}}
+2^4
+B052H
+-32768\sim +32767
