@@ -121,6 +121,17 @@ jobs:
       - name: skips.sh self-test
         shell: bash
         run: scripts/skips-self-test.sh
+      # Real notes, but only the ones that pass: ci-positive.txt is the
+      # whitelist. This reuses the Typst installed above and the binary built
+      # from this checkout; every failure prints the skeleton and the check.
+      - name: Real note CI fixtures
+        shell: bash
+        env:
+          REAL_FIXTURE_WORK: ${{ runner.temp }}/real-fixtures
+        run: |
+          set -euo pipefail
+          cargo build -p green --locked
+          python tools/check_real_fixtures.py --green target/debug/green.exe --out "$REAL_FIXTURE_WORK"
 
   test-app:
     name: test green

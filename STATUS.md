@@ -35,15 +35,15 @@
 
 | 文档（骨架） | 用户会看到什么 | 归属模块与要做的事 |
 | --- | --- | --- |
-| `6.2`、`6.4`、`6.5` | 点导出后整份失败，报 `typst exit code: 1` / `unknown variable: nf`、`ne`、`n2`，拿不到任何 PDF | `crates/green-math/src/lib.rs` 的 `identifiers()`：裸标识符规则只拆 `B052H` 这种“大写字母+数字”，没覆盖字母+字母（`nf`、`ne`）和小写字母+数字（`n2`）。补规则并在 `crates/green-math/src/tests.rs` 加断言。这是转换缺陷，不是环境问题 |
-| 同上三份 | 一条坏公式把整篇导出炸掉，而不是只坏那一条 | `crates/green-export/src/export.rs`：`typst::source()` 的转换失败已有单条降级，`compiler.compile()` 的 Typst 编译失败却直接 `?` 返回。按 `docs/design.md` §7.8 让坏公式降级为字面文本、其余照常导出；这是设计要求的实现缺口，不是新需求 |
-| `6.1`、`6.3`、`数的表示与计算` | PDF 里公式直接显示成源码：`\displaystyle\sum`、`\dfrac`、`\begin{cases}`、`\bigl`、`\mathbb{R}`、`\begin{align*}`；屏幕上都正常 | `crates/green-math/src/lib.rs` 的 TeX→Typst 规则缺这些宏；`crates/green-export/src/typst.rs` 的 `settled()` 只兜住转换器返回 Err，不兜“转成源码但编译通过”。补规则后要用 PDF 文本层断言源码不出现 |
-| 8/9 份（除 `数的表示与计算`）；`6.1`、`6.3` 的 PDF 文本层残留最多 | 屏幕上没事，但从 PDF 复制文字会带出不可见的 U+200B，搜索也可能对不上 | 导出线生成 Typst 文本的入口（`crates/green-export/src/typst.rs` 一带）清理零宽字符；屏幕渲染已正常，不要在编辑器层改 |
-| 九份骨架的侧栏交互（重点抽 `中央处理器CPU` 的 268 个标题、`指令系统` 的 107 个标题） | 折叠箭头与标题层级在静态截图里可见，但侧栏没展开，点击跳转从未验证 | `apps/green/src/side.rs`、`apps/green/src/keys.rs` 的 `toggle_outline`；`--capture` 只有静帧，必须另排一次真窗口/窗口测试：展开大纲、核对层级与折叠箭头、点击标题跳转 |
+| `6.2`、`6.4`、`6.5` | 点导出后整份失败，报 `typst exit code: 1` / `unknown variable: nf`、`ne`、`n2`，拿不到任何 PDF | 2026-11-26 在 `37e8b85` 上观察到，归 `crates/green-math/src/lib.rs` 的 `identifiers()`：当时只拆 `B052H` 这种“大写字母+数字”，没覆盖字母+字母（`nf`、`ne`）和小写字母+数字（`n2`）。现状：`feat/math` 已改成任意裸 ASCII 字母数字串逐字符拆，尚未合入；合入后复验，过了把这三份移进白名单。这是确定的转换缺陷，不是环境问题 |
+| 同上三份 | 一条坏公式把整篇导出炸掉，而不是只坏那一条 | 2026-11-26 在 `37e8b85` 上观察到，归 `crates/green-export/src/export.rs`：`typst::source()` 的转换失败已有单条降级，`compiler.compile()` 的 Typst 编译失败却直接 `?` 返回，连坐整篇。现状：`feat/math` 正在修，尚未合入；合入后按 `docs/design.md` §7.8 复验“坏公式降级为字面文本、其余照常导出”，过了才把这三份移进白名单。这是设计要求的实现缺口，不是新需求 |
+| `6.1`、`6.3`、`数的表示与计算` | PDF 里公式直接显示成源码：`\displaystyle\sum`、`\dfrac`、`\begin{cases}`、`\bigl`、`\mathbb{R}`、`\begin{align*}`；屏幕上都正常 | 2026-11-26 在 `37e8b85` 上观察到，目前未修：`crates/green-math/src/lib.rs` 的 TeX→Typst 规则缺这些宏；`crates/green-export/src/typst.rs` 的 `settled()` 只兜住转换器返回 Err，不兜“转成源码但编译通过”。补规则后要用 PDF 文本层断言源码不出现，过了才把这三份移进白名单 |
+| 8/9 份（除 `数的表示与计算`）；`6.1`、`6.3` 的 PDF 文本层残留最多 | 屏幕上没事，但从 PDF 复制文字会带出不可见的 U+200B，搜索也可能对不上 | 2026-11-26 在 `37e8b85` 上观察到，当前导出层仍未清：归导出线生成 Typst 文本的入口（`crates/green-export/src/typst.rs` 一带）；屏幕渲染已正常，不要在编辑器层改 |
+| 九份骨架的侧栏交互（重点抽 `中央处理器CPU` 的 268 个标题、`指令系统` 的 107 个标题） | 折叠箭头与标题层级在静态截图里可见，但侧栏没展开，点击跳转从未验证 | 2026-11-26 只做了静态截图核对，交互尚未验证；归 `apps/green/src/side.rs`、`apps/green/src/keys.rs` 的 `toggle_outline`。`--capture` 只有静帧，必须另排一次真窗口/窗口测试：展开大纲、核对层级与折叠箭头、点击标题跳转 |
 
 每修好一条，把对应骨架加进 `fixtures/real/ci-positive.txt`，并从上面的待修表里移出；没通过就留在债里。
 白名单是唯一入口，生成骨架后仍要过 `python tools/redact.py --verify fixtures/real/skeletons`。
-本轮按边界不改 `.github/`，CI 接线由 CI 线读这份白名单。
+现状（2026-11-26）：`test` job 已接白名单脚本，复用该 job 安装的 Typst，构建 `green.exe` 后逐份导出并断言体积、字体子集与图片数；失败信息带文件和断言。只有白名单里的三份进 CI，债务不进。
 
 ### 还叫 ely-mark / ElyMark 的地方
 
