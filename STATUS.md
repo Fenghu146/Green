@@ -43,7 +43,7 @@
 
 每修好一条，把对应骨架加进 `fixtures/real/ci-positive.txt`，并从上面的待修表里移出；没通过就留在债里。
 白名单是唯一入口，生成骨架后仍要过 `python tools/redact.py --verify fixtures/real/skeletons`。
-现状（2026-11-26）：`test` job 已接白名单脚本，复用该 job 安装的 Typst，构建 `green.exe` 后逐份导出并断言体积、字体子集与图片数；失败信息带文件和断言。只有白名单里的三份进 CI，债务不进。
+现状（2026-11-26）：`test` job 已接白名单脚本，复用该 job 安装的 Typst，构建 `green.exe` 后逐份导出并断言体积、字体子集与图片数；失败信息带文件和断言。只有白名单里的三份进 CI，债务不进。找不到 `pdffonts` 时必须打印 `pdffonts unavailable: fell back to byte-level check` 并写进 summary，禁止静默降级；`pdfimages` 同理。
 
 ### 还叫 ely-mark / ElyMark 的地方
 

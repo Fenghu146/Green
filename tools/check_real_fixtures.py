@@ -25,7 +25,7 @@ FONT_ROW = re.compile(r"\s+(yes|no)\s+(yes|no)\s+(yes|no)\s+\d+\s+\d+\s*$")
 SUBSET = re.compile(r"^[A-Z]{6}\+")
 IMAGE = re.compile(rb"/Subtype\s*/Image\b")
 FONT_NAME = re.compile(rb"/BaseFont\s*/([^\s/>\[]+)")
-DESCRIPTOR = re.compile(rb"/FontDescriptor\s*<<(.{0,1200}?)>>", re.S)
+DESCRIPTOR = re.compile(rb"\d+ 0 obj\s*<<([^<>]{0,1600}?/Type\s*/FontDescriptor[^<>]{0,1600}?)>>", re.S)
 
 
 def env_with(green, data):
@@ -95,6 +95,7 @@ def fonts_from_pdffonts(pdf):
 def fonts_from_pdf(pdf):
     raw = pdf.read_bytes()
     names = [m.group(1).decode("latin1") for m in FONT_NAME.finditer(raw)]
+    bare = [n for n in names if not SUBSET.match(n)]
     subsets = {n[:7] for n in names if SUBSET.match(n)}
     descriptors = [m.group(1) for m in DESCRIPTOR.finditer(raw)]
     embedded = sum(
@@ -106,11 +107,11 @@ def fonts_from_pdf(pdf):
             for d in descriptors
         )
     )
-    return names, len(subsets), embedded
+    return bare, subsets, embedded
 
 
-def images(pdf):
-    if shutil.which("pdfimages"):
+def images(pdf, has_pdfimages):
+    if has_pdfimages:
         out = subprocess.run(
             ["pdfimages", "-list", str(pdf)],
             capture_output=True,
@@ -123,11 +124,11 @@ def images(pdf):
     return len(IMAGE.findall(pdf.read_bytes())), "pdf bytes"
 
 
-def audit(pdf, fixture, errors):
+def audit(pdf, fixture, errors, has_pdffonts, has_pdfimages):
     size = pdf.stat().st_size
     if size > SIZE_LIMIT:
         errors.append(f"{fixture} [size]: actual={size}B expected<={SIZE_LIMIT}B")
-    if shutil.which("pdffonts"):
+    if has_pdffonts:
         fonts = fonts_from_pdffonts(pdf)
         if not fonts:
             errors.append(f"{fixture} [fonts]: actual=0 font rows expected=at least one embedded subset font")
@@ -136,15 +137,15 @@ def audit(pdf, fixture, errors):
             errors.append(f"{fixture} [pdffonts sub]: actual={bad} expected=all emb=yes sub=yes")
         font_note = f"fonts {len(fonts)} with emb/sub=yes"
     else:
-        names, subsets, embedded = fonts_from_pdf(pdf)
-        if not names:
-            errors.append(f"{fixture} [fonts]: actual=no /BaseFont expected=at least one embedded subset font")
-        if len(subsets) != len(names):
-            errors.append(f"{fixture} [font subset]: actual={names} expected=a 6-letter subset prefix on every name")
+        bare, subsets, embedded = fonts_from_pdf(pdf)
+        if not subsets:
+            errors.append(f"{fixture} [fonts]: actual=no subset /BaseFont expected=at least one embedded subset font")
+        if bare:
+            errors.append(f"{fixture} [font subset]: actual={bare} expected=a 6-letter subset prefix on every name")
         if embedded != len(subsets):
             errors.append(f"{fixture} [font embed]: actual={embedded}/{len(subsets)} expected=every font embedded")
         font_note = f"fonts {embedded}/{len(subsets)} embedded subsets (pdf bytes)"
-    count, via = images(pdf)
+    count, via = images(pdf, has_pdfimages)
     if count:
         errors.append(f"{fixture} [images]: actual={count} expected=0 (via {via})")
     return f"size={size}B, {font_note}, images={count} ({via})"
@@ -160,6 +161,15 @@ def main():
         sys.exit(f"check_real_fixtures: {args.green} is not a Green binary")
     if not os.environ.get("GREEN_TYPST"):
         sys.exit("check_real_fixtures: GREEN_TYPST is not set; use the Typst installed by the test job")
+    has_pdffonts = shutil.which("pdffonts") is not None
+    has_pdfimages = shutil.which("pdfimages") is not None
+    notes = []
+    if not has_pdffonts:
+        notes.append("pdffonts unavailable: fell back to byte-level check")
+    if not has_pdfimages:
+        notes.append("pdfimages unavailable: fell back to byte-level check")
+    for line in notes:
+        print(line, flush=True)
     lines = [line.strip() for line in args.list.read_text(encoding="utf-8").splitlines() if line.strip()]
     if not lines:
         sys.exit(f"check_real_fixtures: {args.list} is empty")
@@ -180,7 +190,7 @@ def main():
             errors.append(f"{fixture} [pdf]: actual=missing expected=a written PDF")
             continue
         try:
-            report.append(f"OK {fixture}: {audit(pdf, fixture, errors)}")
+            report.append(f"OK {fixture}: {audit(pdf, fixture, errors, has_pdffonts, has_pdfimages)}")
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             errors.append(f"{fixture} [audit]: actual={error} expected=readable PDF audit")
     for line in report:
@@ -190,7 +200,7 @@ def main():
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as out:
-            out.write("\n".join(f"- {line}" for line in report + errors) + "\n")
+            out.write("\n".join(f"- {line}" for line in notes + report + errors) + "\n")
     if errors:
         sys.exit(f"check_real_fixtures: {len(errors)} failed checks")
     print(f"check_real_fixtures: {len(lines)} real skeletons export and audit clean")
