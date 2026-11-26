@@ -94,6 +94,7 @@ S2 的证据（缺一项即未完成）：5 万字 K2P p50/p95/p99、>16 ms 占�
 | 改 `ely-office/src/lib.rs` 一行后的增量 | **26.4 s** |
 | `ely-mark.exe` | debug **73.0 MB**；release **40.6 MB** |
 | 能否打开 .md | **能**：`ELY_SMOKE=1` 退出码 0，`opened 作业.md as tab 0` / `window shown`，到首帧 2.2 s |
+| 2026-11-26 补 | `ely-pdf-worker` 与 `ely-pdf-engine` 一并移出 workspace：PDF 阅读已砍，worker 要 MuPDF 引擎，是整仓 `cargo build`/`cargo test` 的唯一阻塞 |
 
 ### 1.4 体积预算（80–100 MB）
 

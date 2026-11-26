@@ -25,7 +25,8 @@ fn packaging_table_lists_the_apps_in_prd_order() {
             Doc | Table | Show => "MIT AND MPL-2.0",
             Pdf => "MIT AND AGPL-3.0-or-later",
             Tree => "MIT AND GPL-2.0-only",
-            Mark => "MIT AND AGPL-3.0-or-later AND GPL-2.0-only",
+            // Green is one GPL binary: no LOK, no MuPDF to carry along.
+            Mark => "GPL-3.0-or-later",
             Mail | Agent => "MIT",
         };
         assert_eq!(row[4], license, "{}", app.slug());

@@ -44,6 +44,8 @@ fn either_panel_folds_from_its_key(cx: &mut TestAppContext) {
     cx.update(|cx| {
         ely_gpui_component::init_for_tests(cx);
         crate::settings::install_defaults(cx);
+        // The fork starts with the left panel folded; these tests read both open.
+        crate::settings::panels::show(true, true, cx);
         crate::i18n::install_as("en-US", cx);
         crate::commands::bind_keys(cx);
     });
@@ -78,6 +80,8 @@ fn a_panel_without_room_goes_at_once(cx: &mut TestAppContext) {
     cx.update(|cx| {
         ely_gpui_component::init_for_tests(cx);
         crate::settings::install_defaults(cx);
+        // The fork starts with the left panel folded; this test reads both open.
+        crate::settings::panels::show(true, true, cx);
         crate::i18n::install_as("en-US", cx);
     });
     let window = cx.add_window(|_, cx| {
@@ -118,6 +122,8 @@ fn a_fold_at_a_narrow_width_never_squeezes_the_content(cx: &mut TestAppContext) 
     cx.update(|cx| {
         ely_gpui_component::init_for_tests(cx);
         crate::settings::install_defaults(cx);
+        // The fork starts with the left panel folded; these tests read both open.
+        crate::settings::panels::show(true, true, cx);
         crate::i18n::install_as("en-US", cx);
         crate::commands::bind_keys(cx);
     });
@@ -143,6 +149,8 @@ fn both_at(cx: &mut TestAppContext, width: f32) -> VisualTestContext {
     cx.update(|cx| {
         ely_gpui_component::init_for_tests(cx);
         crate::settings::install_defaults(cx);
+        // The fork starts with the left panel folded; these tests read both open.
+        crate::settings::panels::show(true, true, cx);
         crate::i18n::install_as("en-US", cx);
         crate::commands::bind_keys(cx);
     });
@@ -225,6 +233,8 @@ fn a_panel_that_comes_with_content_takes_its_width_at_once(cx: &mut TestAppConte
     cx.update(|cx| {
         ely_gpui_component::init_for_tests(cx);
         crate::settings::install_defaults(cx);
+        // The fork starts with the left panel folded; these tests read both open.
+        crate::settings::panels::show(true, true, cx);
         crate::i18n::install_as("en-US", cx);
         crate::commands::bind_keys(cx);
     });

@@ -2622,32 +2622,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ely-pdf-engine"
-version = "0.1.17"
-dependencies = [
- "ely-ipc",
- "log",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "ely-pdf-worker"
-version = "0.1.17"
-dependencies = [
- "cc",
- "ely-ipc",
- "ely-pdf-engine",
- "env_logger",
- "log",
- "lopdf",
- "objc2 0.6.4",
- "objc2-foundation 0.3.2",
- "objc2-pdf-kit",
- "tempfile",
-]
-
-[[package]]
 name = "ely-platform"
 version = "0.1.17"
 dependencies = [

@@ -377,7 +377,7 @@ mod home_tests {
         let (_, _, asker) = homed(main, cx);
         let refused = ask(&asker, "docs");
         cx.run_until_parked();
-        assert_eq!(refused.try_recv(), Ok(Err("ElyMark takes no requests".into())));
+        assert_eq!(refused.try_recv(), Ok(Err("Green takes no requests".into())));
         cx.update(|cx| on_ask(cx, |ask, _| {
             let echo = ask.request.to_uppercase();
             ask.answer(Ok(echo))
