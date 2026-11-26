@@ -17,6 +17,7 @@ crates/       基座（ElyOffice 剪枝）：ely-ui（外壳、主题、设置�
               ely-files  ely-ipc  ely-start  ely-mail-engine  ely-mail-fake
 assets/fonts/ 随包字体：Noto Sans CJK SC Regular/Bold（OFL-1.1），GPUI 与 Typst 共用
 vendor/       经 [patch.crates-io] 换入的上游副本（gpui-pre 等），不改上游语义
+patches/      vendor 的补丁序列：gpui 与组件库各一套；scripts/vendor-*.sh 重放并逐文件核对
 packaging/    三端打包脚本；S6 使用
 docs/         design.md 与历史；docs/base/ 是基座原文
 ```

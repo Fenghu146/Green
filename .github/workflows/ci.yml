@@ -125,6 +125,23 @@ jobs:
       # named there. `-D unnecessary-skip` keeps the bans skip list honest.
       - run: cargo deny check -D unnecessary-skip -D unmatched-skip
 
+  # vendor/ is a build input: these replay the patch series against the pinned
+  # upstreams and compare the result with what is committed, file by file.
+  vendor:
+    name: vendor
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: scripts/vendor-gpui.sh check
+      - shell: bash
+        run: scripts/vendor-components.sh check
+      # docs/compatibility.md names the pins and the patch counts; this says it
+      # still does.
+      - shell: bash
+        run: python scripts/compatibility.py --check
+
   notices:
     name: notices
     runs-on: windows-latest

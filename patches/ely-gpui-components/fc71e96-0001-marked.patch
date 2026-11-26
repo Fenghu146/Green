@@ -1,0 +1,125 @@
+baseline: ely-gpui-components fc71e964088e0de2a81abff572a5684be17ebfd4, the rev Cargo.toml pins
+bump: If the fork's reader already turns `==x==` into a Mark run, drop this. If `Reader::inline_text` or `Style` moved, rewrite.
+
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/tree/mod.rs b/vendor/ely-gpui-components/crates/ely-documents/src/tree/mod.rs
+index 6859312..88ff530 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/tree/mod.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/tree/mod.rs
+@@ -349,7 +349,7 @@ impl<'a> Reader<'a> {
+                 text = drawn;
+             }
+         }
+-        text
++        marked(text)
+     }
+ 
+     /// Inline nodes as the HTML GitHub writes, images set aside.
+@@ -485,7 +485,79 @@ fn wrapped(out: &mut Written, name: &str, attributes: &str, text: &str) {
+ }
+ 
+ /// Text left between images, unless it is blank.
++
++/// `==marked==` text: the markers leave the drawing, the run is a `Mark`.
++fn marked(mut inline: Inline) -> Inline {
++    let text = inline.text.clone();
++    // Code and math draw their own text: `==` inside them stays as written.
++    let verbatim: Vec<Range<usize>> = (inline.styles.iter())
++        .filter(|(_, style)| matches!(style, Style::Code | Style::Math))
++        .map(|(range, _)| range.clone())
++        .collect();
++    let literal = |at: usize| verbatim.iter().any(|range| range.contains(&at));
++    let mut pairs = Vec::new();
++    let mut at = 0;
++    while let Some(found) = text[at..].find("==") {
++        let open = at + found;
++        let Some(tail) = text[open + 2..].find("==") else {
++            break;
++        };
++        let close = open + 2 + tail;
++        match (close > open + 2, literal(open)) {
++            (true, false) => pairs.push((open, close)),
++            (true, true) => {}
++            (false, _) => {}
++        }
++        at = if literal(open) { open + 2 } else { close + 2 };
++    }
++    if pairs.is_empty() {
++        return inline;
++    }
++    let removed: Vec<(usize, usize)> = pairs
++        .iter()
++        .flat_map(|(open, close)| [(*open, *open + 2), (*close, *close + 2)])
++        .collect();
++    let shift = |offset: usize| {
++        let mut shift = 0;
++        for (start, end) in &removed {
++            if offset <= *start {
++                break;
++            }
++            if offset >= *end {
++                shift += end - start;
++            } else {
++                return start - shift;
++            }
++        }
++        offset - shift
++    };
++    let mut drawn = String::with_capacity(text.len());
++    let mut old = 0;
++    for (open, close) in &pairs {
++        drawn.push_str(&text[old..*open]);
++        drawn.push_str(&text[open + 2..*close]);
++        old = close + 2;
++    }
++    drawn.push_str(&text[old..]);
++    let marked = pairs
++        .iter()
++        .map(|(open, close)| (shift(open + 2)..shift(*close), Style::Mark));
++    inline.styles = (inline.styles.iter())
++        .map(|(range, style)| (shift(range.start)..shift(range.end), *style))
++        .chain(marked)
++        .collect();
++    inline.links = (inline.links.iter())
++        .map(|(range, url)| (shift(range.start)..shift(range.end), url.clone()))
++        .collect();
++    inline.sources = (inline.sources.iter())
++        .map(|(at, span, escapes)| (shift(*at), span.clone(), *escapes))
++        .collect();
++    inline.text = drawn;
++    inline
++}
++
+ fn text_block(text: Inline, out: &mut Vec<Node>) {
++    let text = marked(text);
+     if !text.text.trim().is_empty() {
+         out.push(Node::Paragraph(text));
+     }
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/tree/tests/inline.rs b/vendor/ely-gpui-components/crates/ely-documents/src/tree/tests/inline.rs
+index 6e8b77e..71e9072 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/tree/tests/inline.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/tree/tests/inline.rs
+@@ -452,3 +452,24 @@ fn a_block_moved_out_of_the_paragraph_takes_its_own_lines() {
+     // The `b` splits round the `div`, as html5ever builds it.
+     assert_eq!(marked(&bold, Style::Strong), [(2, 3), (5, 6), (7, 8)]);
+ }
++
++#[test]
++fn double_equals_highlights_and_keeps_the_source() {
++    let text = line("前 ==重点== 后 ==再一个== end");
++    assert_eq!(text.text, "前 重点 后 再一个 end");
++    assert_eq!(text.styles, [(4..10, Style::Mark), (15..24, Style::Mark)]);
++    // The markers map to nothing: a press after them lands on the source after `==`.
++    let source = "前 ==重点== 后";
++    let found = match parse(source).into_iter().next() {
++        Some(Node::Paragraph(text)) => text,
++        other => panic!("a paragraph, not {other:?}"),
++    };
++    assert_eq!(found.text, "前 重点 后");
++}
++
++#[test]
++fn a_lone_pair_stays_text() {
++    let text = line("a == b");
++    assert_eq!(text.text, "a == b");
++    assert!(text.styles.is_empty());
++}

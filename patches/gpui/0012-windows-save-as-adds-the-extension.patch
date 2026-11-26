@@ -1,0 +1,48 @@
+baseline: gpui-pre =0.3.14, the version Cargo.toml pins (the crate records no VCS commit; scripts/vendor-gpui.sh holds the tarball hashes)
+bump: If Save As appends the filter's extension itself, drop this. If the dialog code lives in `gpui-pre-windows`, rewrite.
+
+windows: Save As adds the suggested name's extension
+
+A name typed without an extension was saved bare (Ely R14.48a).
+
+diff --git a/vendor/gpui-pre-windows/src/platform.rs b/vendor/gpui-pre-windows/src/platform.rs
+--- a/vendor/gpui-pre-windows/src/platform.rs
++++ b/vendor/gpui-pre-windows/src/platform.rs
+@@ -1645,6 +1645,13 @@ fn file_save_dialog(
+         };
+     }
+ 
++    // A name typed without one gets the suggested name's extension.
++    let kind = suggested_name
++        .as_deref()
++        .and_then(|name| std::path::Path::new(name).extension())
++        .and_then(|extension| extension.to_str())
++        .map(|extension| (HSTRING::from(extension), HSTRING::from(format!("*.{extension}"))));
++
+     if let Some(suggested_name) = suggested_name {
+         unsafe {
+             dialog
+@@ -1655,10 +1662,21 @@ fn file_save_dialog(
+     }
+ 
+     unsafe {
+-        dialog.SetFileTypes(&[Common::COMDLG_FILTERSPEC {
++        let all = Common::COMDLG_FILTERSPEC {
+             pszName: windows::core::w!("All files"),
+             pszSpec: windows::core::w!("*.*"),
+-        }])?;
++        };
++        match &kind {
++            Some((extension, spec)) => {
++                let own = Common::COMDLG_FILTERSPEC {
++                    pszName: PCWSTR(spec.as_ptr()),
++                    pszSpec: PCWSTR(spec.as_ptr()),
++                };
++                dialog.SetFileTypes(&[own, all])?;
++                dialog.SetDefaultExtension(extension)?;
++            }
++            None => dialog.SetFileTypes(&[all])?,
++        }
+         if let Err(error) = dialog.Show(window) {
+             if error.code() == HRESULT::from_win32(ERROR_CANCELLED.0) {
+                 return Ok(None);
