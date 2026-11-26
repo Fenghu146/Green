@@ -12,10 +12,17 @@ all-features = true
 unmaintained = "workspace"
 unsound = "all"
 yanked = "deny"
-# Both are quick-xml 0.38.4, pinned by citationberg <- hayagriva <- typst-library:
-# XML denial of service. Green hands typst no user-supplied XML, and the fix is a
-# typst release that moves hayagriva off citationberg 0.7 — that bump is the
-# mainline's call. Review when typst is updated.
+# Three ignored advisories, each with the reason it is not a fix we can make:
+#
+# - RUSTSEC-2026-0194 / 0195: quick-xml 0.38.4, pinned by citationberg <-
+#   hayagriva <- typst-library. XML denial of service. Green hands typst no
+#   user-supplied XML, and the fix is a typst release that moves hayagriva off
+#   citationberg 0.7 — that bump is the mainline's call. Review when typst moves.
+#
+# - RUSTSEC-2026-0192: ttf-parser 0.25.1 is unmaintained, not vulnerable. It is
+#   pulled by fontdb <- cosmic-text <- gpui's wgpu backend, and that gpui is the
+#   vendored copy under vendor/ (patches/gpui owns it), so the swap is ours to
+#   make only when gpui's own pin moves. Review with that pin.
 ignore = [
     { id = "RUSTSEC-2026-0194", reason = "quadratic scan of a start tag, inside typst's citationberg; no untrusted XML reaches it" },
     { id = "RUSTSEC-2026-0195", reason = "unbounded namespace declarations, same path; fixed by a typst bump" },
@@ -47,15 +54,6 @@ allow = [
 # -or-later by construction, and MPL-2.0 except for the crates named below.
 confidence-threshold = 0.93
 
-# Our own crates that do not say `publish = false` in their manifest, so cargo-deny
-# reads them as published. Both are Green's, under Green's licence.
-[[licenses.exceptions]]
-crate = "green-math"
-allow = ["GPL-3.0-or-later"]
-
-[[licenses.exceptions]]
-crate = "green-plugins"
-allow = ["GPL-3.0-or-later"]
 
 # MPL-2.0 is GPL-compatible and its obligations are met by shipping the sources,
 # which crates.io holds under the same version. Each is named so the pattern does
