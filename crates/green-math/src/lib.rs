@@ -57,6 +57,50 @@ const SYMBOLS: &[(&str, &str)] = &[
     ("cdots", "dots.h.c"),
     ("quad", "quad"),
     ("qquad", "quad quad"),
+    // Sets and relations: the notes' "x ∈ ℝ" and its neighbours.
+    ("in", "in"),
+    ("notin", "in.not"),
+    ("ni", "in.rev"),
+    ("subset", "subset"),
+    ("subseteq", "subset.eq"),
+    ("supset", "supset"),
+    ("supseteq", "supset.eq"),
+    ("cup", "union"),
+    ("cap", "inter"),
+    ("emptyset", "emptyset"),
+    ("varnothing", "emptyset"),
+    ("forall", "forall"),
+    ("exists", "exists"),
+    ("neg", "not"),
+    ("land", "and"),
+    ("lor", "or"),
+    ("Rightarrow", "arrow.r.double"),
+    ("Leftrightarrow", "arrow.l.r.double"),
+    ("implies", "arrow.r.double.long"),
+    ("iff", "arrow.l.r.double.long"),
+    ("partial", "partial"),
+    ("nabla", "nabla"),
+    ("ldots", "dots.h"),
+    ("vdots", "dots.v"),
+    ("ddots", "dots.down"),
+    ("circ", "compose"),
+    ("angle", "angle"),
+    // Operators that name themselves: their arguments follow, not their size.
+    ("lim", "lim"),
+    ("ln", "ln"),
+    ("log", "log"),
+    ("exp", "exp"),
+    ("sin", "sin"),
+    ("cos", "cos"),
+    ("tan", "tan"),
+    ("arcsin", "arcsin"),
+    ("arccos", "arccos"),
+    ("arctan", "arctan"),
+    ("max", "max"),
+    ("min", "min"),
+    ("sup", "sup"),
+    ("inf", "inf"),
+    ("det", "det"),
     ("alpha", "alpha"),
     ("beta", "beta"),
     ("gamma", "gamma"),
@@ -77,6 +121,29 @@ const SYMBOLS: &[(&str, &str)] = &[
     ("Sigma", "Sigma"),
     ("Phi", "Phi"),
     ("Omega", "Omega"),
+];
+
+/// Commands that only change a glyph's size or style: the glyphs stay, the
+/// command goes. Typst sizes its own delimiters.
+const DROPPED: &[&str] = &[
+    "big",
+    "Big",
+    "bigg",
+    "Bigg",
+    "bigl",
+    "bigr",
+    "Bigl",
+    "Bigr",
+    "biggl",
+    "biggr",
+    "Biggl",
+    "Biggr",
+    "displaystyle",
+    "textstyle",
+    "scriptstyle",
+    "scriptscriptstyle",
+    "limits",
+    "nolimits",
 ];
 
 /// Characters that follow a backslash as themselves.
@@ -133,7 +200,12 @@ pub fn gbox_rule(stroke: &str) -> String {
 /// The whitelist, for the message an unsupported command gets.
 pub fn whitelisted(name: &str) -> bool {
     SYMBOLS.iter().any(|(known, _)| *known == name)
-        || matches!(name, "frac" | "sqrt" | "text" | "boxed" | "left" | "right")
+        || DROPPED.contains(&name)
+        || matches!(
+            name,
+            "frac" | "dfrac" | "sqrt" | "text" | "boxed" | "left" | "right" | "mathbb" | "begin"
+                | "end"
+        )
 }
 
 struct Reader<'a> {
@@ -247,7 +319,11 @@ impl<'a> Reader<'a> {
                 let ch = self.bump().expect("a character");
                 return match ch {
                     '\\' => "\\".into(),
-                    ' ' | ',' | ';' | ':' | '!' => "space".into(),
+                    // Spacing, as Typst names it.
+                    ' ' => "space".into(),
+                    ',' => "thin".into(),
+                    ';' | ':' => "med".into(),
+                    '!' => "#h(-0.167em)".into(),
                     // Escaped as Typst escapes it: `#`, `$` and `_` are syntax in math.
                     other if ESCAPED.contains(&other) => format!("\\{other}"),
                     other => {
@@ -264,9 +340,19 @@ impl<'a> Reader<'a> {
         }
         let name = self.name();
         match name.as_str() {
-            "frac" => {
+            "begin" => self.environment(at),
+            "end" => {
+                // The environment's end was consumed with its body.
+                self.raw_group();
+                String::new()
+            }
+            "frac" | "dfrac" => {
                 let (up, down) = (self.atom(), self.atom());
                 format!("frac({up}, {down})")
+            }
+            "mathbb" => {
+                let set = self.atom();
+                format!("bb({set})")
             }
             "sqrt" => {
                 self.skip_space();
@@ -311,12 +397,78 @@ impl<'a> Reader<'a> {
             }
             _ => match SYMBOLS.iter().find(|(known, _)| *known == name) {
                 Some((_, typst)) => (*typst).into(),
+                // A size or style switch changes no meaning here.
+                None if DROPPED.contains(&name.as_str()) => String::new(),
                 None => {
                     self.errors.push(Unsupported { name, at });
                     String::new()
                 }
             },
         }
+    }
+
+    /// `\begin{cases} … \end{cases}`: Typst's own `cases`, one argument a row.
+    /// Any other environment is named, not guessed.
+    fn environment(&mut self, at: usize) -> String {
+        let Some(name) = self.raw_group() else {
+            self.errors.push(Unsupported {
+                name: "begin".into(),
+                at,
+            });
+            return String::new();
+        };
+        match name.trim() {
+            "cases" => self.cases(at),
+            other => {
+                self.errors.push(Unsupported {
+                    name: format!("begin{{{other}}}"),
+                    at,
+                });
+                String::new()
+            }
+        }
+    }
+
+    /// The body of `cases` to `\end{cases}`; rows break at `\\`.
+    fn cases(&mut self, at: usize) -> String {
+        const END: &str = "\\end{cases}";
+        let start = self.offset();
+        let rest = &self.source[start..];
+        let Some(stop) = rest.find(END) else {
+            self.errors.push(Unsupported {
+                name: "begin{cases}".into(),
+                at,
+            });
+            return String::new();
+        };
+        let body = rest[..stop].to_string();
+        // Step past the body and its end marker.
+        let mut left = stop + END.len();
+        while left > 0 {
+            let Some(ch) = self.bump() else { break };
+            left -= ch.len_utf8();
+        }
+        let rows = rows(&body);
+        // Typst's own `cases`, an argument a row; amsmath spaces the columns a
+        // quad apart, and Typst's alignment point alone would run them on.
+        let mut out = String::from("cases(");
+        for (ix, row) in rows.iter().enumerate() {
+            if ix > 0 {
+                out.push_str(", ");
+            }
+            let cells: Vec<String> = (row.split('&'))
+                .map(|cell| {
+                    let mut reader = Reader::new(cell);
+                    let converted = reader.sequence(None);
+                    self.errors.extend(reader.errors);
+                    converted.trim().to_string()
+                })
+                .filter(|cell| !cell.is_empty())
+                .collect();
+            out.push_str(&cells.join(" & quad "));
+        }
+        out.push(')');
+        out
     }
 
     /// A run of glyphs to `end`, or the end.
@@ -352,7 +504,7 @@ impl<'a> Reader<'a> {
                     let word = piece
                         .chars()
                         .next()
-                        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '"');
+                        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '"' || ch == '#');
                     if word
                         && out
                             .chars()
@@ -431,6 +583,31 @@ impl<'a> Reader<'a> {
         }
         out
     }
+}
+
+/// `cases` rows, broken at `\\`; a row's `[4pt]` spacing is the layout's.
+fn rows(body: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    let mut current = String::new();
+    let mut chars = body.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' && chars.peek() == Some(&'\\') {
+            chars.next();
+            rows.push(std::mem::take(&mut current));
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for ch in chars.by_ref() {
+                    if ch == ']' {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    rows.push(current);
+    rows
 }
 
 /// A run of letters and digits: numbers stay whole, a name means its letters
