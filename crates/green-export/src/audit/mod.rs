@@ -107,7 +107,8 @@ impl Warning {
                 share * 100.0
             ),
             Self::MissingGlyphs { found } => format!(
-                "export: {} characters are in none of the bundled fonts: {}",
+                "export: {} characters are in none of the bundled fonts and print as boxes: {}; \
+                 write them another way, or bundle a face that covers them — this check passes once one does",
                 found.len(),
                 found.join(", ")
             ),
