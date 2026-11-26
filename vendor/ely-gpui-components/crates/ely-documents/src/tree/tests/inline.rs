@@ -457,7 +457,7 @@ fn a_block_moved_out_of_the_paragraph_takes_its_own_lines() {
 fn double_equals_highlights_and_keeps_the_source() {
     let text = line("前 ==重点== 后 ==再一个== end");
     assert_eq!(text.text, "前 重点 后 再一个 end");
-    assert_eq!(text.styles, [(3..7, Style::Mark), (11..16, Style::Mark)]);
+    assert_eq!(text.styles, [(4..10, Style::Mark), (15..24, Style::Mark)]);
     // The markers map to nothing: a press after them lands on the source after `==`.
     let source = "前 ==重点== 后";
     let found = match parse(source).into_iter().next() {
