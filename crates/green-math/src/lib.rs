@@ -243,7 +243,7 @@ impl<'a> Reader<'a> {
     }
 
     fn skip_space(&mut self) {
-        while matches!(self.peek(), Some(' ' | '\t' | '\n' | '\r')) {
+        while matches!(self.peek(), Some(' ' | '\t' | '\n' | '\r' | '\u{200b}')) {
             self.at += 1;
         }
     }
@@ -537,7 +537,7 @@ impl<'a> Reader<'a> {
                     out.push(')');
                 }
                 '}' => break,
-                ' ' | '\t' | '\n' | '\r' => {
+                ' ' | '\t' | '\n' | '\r' | '\u{200b}' => {
                     self.skip_space();
                     if !out.ends_with(' ') && !out.is_empty() {
                         out.push(' ');

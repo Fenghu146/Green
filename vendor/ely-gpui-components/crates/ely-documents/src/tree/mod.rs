@@ -507,24 +507,28 @@ fn marks(inline: Inline) -> Inline {
         sources,
     } = inline;
     let mut out = String::with_capacity(text.len());
-    // Where each written byte lands in the drawn text; one past the end too.
-    let mut moved = Vec::with_capacity(text.len() + 1);
+    // Where each written *byte* lands in the drawn text. A span starts and
+    // ends at character boundaries, but the map is indexed by byte offset:
+    // `×` is shorter than `❌`, so counting characters shifts every formula
+    // after one and slices it in the middle.
+    let mut moved = vec![0usize; text.len() + 1];
     let mut added = Vec::new();
-    for ch in text.chars() {
-        moved.push(out.len());
+    for (byte, ch) in text.char_indices() {
         let (drawn, style) = match ch {
-            '✅' => ('✓', Style::Pass),
-            '❌' => ('×', Style::Fail),
-            other => {
-                out.push(other);
-                continue;
-            }
+            '✅' => ('✓', Some(Style::Pass)),
+            '❌' => ('×', Some(Style::Fail)),
+            other => (other, None),
         };
         let start = out.len();
+        for offset in 0..ch.len_utf8() {
+            moved[byte + offset] = start;
+        }
         out.push(drawn);
-        added.push((start..out.len(), style));
+        if let Some(style) = style {
+            added.push((start..out.len(), style));
+        }
     }
-    moved.push(out.len());
+    moved[text.len()] = out.len();
     let end = out.len();
     let at = |place: usize| moved.get(place).copied().unwrap_or(end);
     let mut styles: Vec<(Range<usize>, Style)> = (styles)

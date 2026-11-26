@@ -337,6 +337,7 @@ mod tests {
         DocumentHeading {
             depth,
             title: title.to_string(),
+            runs: Default::default(),
             at,
         }
     }

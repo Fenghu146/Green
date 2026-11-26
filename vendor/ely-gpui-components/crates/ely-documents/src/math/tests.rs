@@ -71,6 +71,29 @@ fn a_failed_formula_shows_as_its_tex() {
 }
 
 #[test]
+fn a_second_draw_of_one_formula_hits_the_lru() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../assets/fonts");
+    let bytes = std::fs::read(std::path::Path::new(dir).join("NotoSansMath-Regular.ttf"))
+        .expect("the bundled math face");
+    let faces = vec![Font::new(Bytes::new(bytes), 0).expect("a face")];
+    start(faces).expect("the engine starts");
+
+    let one = formula(r"\frac{1}{2}", true);
+    let before = counts();
+    let started = Instant::now();
+    let first = typeset_now(&one).expect("the first draw");
+    let missed = started.elapsed();
+    let started = Instant::now();
+    let second = typeset_now(&one).expect("the second draw");
+    let hit = started.elapsed();
+    let after = counts();
+    assert_eq!(after.hits, before.hits + 1, "one cache hit");
+    assert_eq!(after.misses, before.misses + 1, "one compile");
+    assert_eq!(first.size, second.size, "the same picture");
+    eprintln!("cache miss {:.3} ms, cache hit {:.3} ms", missed.as_secs_f64() * 1000.0, hit.as_secs_f64() * 1000.0);
+}
+
+#[test]
 fn the_cache_is_bounded() {
     // The bound is what keeps a long session's pictures from growing.
     assert!((1..=1024).contains(&KEPT), "{KEPT}");

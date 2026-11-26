@@ -434,18 +434,13 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_failed_formula_says_why_after_its_tex(cx: &mut gpui::TestAppContext) {
-        let found = laid("a x^2^3 b", 2..7, 400.0, cx);
+    fn a_failed_formula_shows_its_tex_between_dollars(cx: &mut gpui::TestAppContext) {
+        let found = laid("a \\notacommand b", 2..14, 400.0, cx);
         let found = found.borrow();
         let (shown, _) = found.as_ref().expect("drawn");
         let shown = shown.borrow();
         let Shown { layout, swaps } = shown.as_ref().expect("laid out");
-        assert_eq!(swaps[0].0, 7..7, "the TeX stays; the reason follows");
-        let text = layout.wrapped_text();
-        assert!(
-            text.starts_with("a x^2^3 (") && text.ends_with(") b"),
-            "{text:?}"
-        );
-        assert!(text.contains(" at "), "where RaTeX stopped: {text:?}");
+        assert_eq!(swaps[0].0, 2..14, "the source stays where it was written");
+        assert_eq!(layout.wrapped_text(), "a $\\notacommand$ b");
     }
 }

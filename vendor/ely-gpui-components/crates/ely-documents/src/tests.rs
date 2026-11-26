@@ -388,10 +388,10 @@ fn a_picture_in_a_narrow_cell_shrinks_within_it(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_formula_that_fails_shows_why_and_its_source(cx: &mut TestAppContext) {
+fn a_formula_that_fails_shows_its_source(cx: &mut TestAppContext) {
     cx.update(Theme::init);
     let (_, cx) = cx.add_window_view(|_, _| Page {
-        source: "$$x^2^3$$\n",
+        source: "$$\\notacommand x$$\n",
         base: std::env::temp_dir(),
         width: 300.0,
     });

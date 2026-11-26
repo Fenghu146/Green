@@ -426,7 +426,7 @@ impl Draw<'_> {
                 .py_2()
                 .child(match Latex::parse(self.key("math"), tex) {
                     Ok(math) => math.display().into_any_element(),
-                    Err(error) => failed(&error, tex, cx),
+                    Err(_error) => failed(tex, cx),
                 })
                 .into_any_element(),
             Node::Image { alt, url, link, at } => {

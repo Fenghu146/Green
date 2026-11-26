@@ -40,6 +40,13 @@ fn operators_name_themselves() {
 }
 
 #[test]
+fn a_zero_width_space_is_whitespace() {
+    // The notes glue formulas to Chinese with U+200B; it is not a glyph.
+    assert_eq!(typst("\u{200b}\\sqrt3\u{200b}"), "sqrt(3)");
+    assert_eq!(typst("\\mathbb{\u{200b}R\u{200b}}"), "bb(R)");
+}
+
+#[test]
 fn a_root_takes_a_bare_token() {
     // `$\sqrt3$` and `$\sqrt{3}$` are both written; both mean the same.
     assert_eq!(typst(r"\sqrt3"), "sqrt(3)");

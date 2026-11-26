@@ -2,7 +2,7 @@
 //! export share one engine, one font set and one baseline (design §6).
 
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     fmt,
     sync::{Arc, Mutex, OnceLock},
     time::Instant,
@@ -183,6 +183,8 @@ struct Cache {
     counts: MathCounts,
     /// The last failure's words, for the status bar.
     last: Option<SharedString>,
+    /// One formula can be drawn every frame; count and log it once.
+    failed: HashSet<(SharedString, bool)>,
 }
 
 /// Formulas held at once; each picture is a few kilobytes.
@@ -196,6 +198,7 @@ fn cache() -> &'static Mutex<Cache> {
             kept: VecDeque::new(),
             counts: MathCounts::default(),
             last: None,
+            failed: HashSet::new(),
         })
     })
 }
@@ -254,16 +257,21 @@ fn typeset_now(formula: &Formula) -> Typeset {
             }
             Ok(glyph)
         }
-        Err(error) => Err(failed_counted(error)),
+        Err(error) => Err(failed_counted(error, &formula.source, formula.display)),
     }
 }
 
 /// Counts a formula that will not draw, and says so once per formula: the
 /// note is the number the status bar reads, not the words.
-fn failed_counted(error: MathError) -> MathError {
+fn failed_counted(error: MathError, source: &str, display: bool) -> MathError {
+    let key = (SharedString::from(source), display);
     let mut cache = cache().lock().expect("the formula cache");
+    if !cache.failed.insert(key) {
+        return error;
+    }
     cache.counts.failed += 1;
     cache.last = Some(error.message.clone());
+    drop(cache);
     // The formula is the user's text: the log names no words.
     log::warn!("math: a formula did not typeset");
     error
@@ -507,7 +515,7 @@ impl RenderOnce for Latex {
                 .w(glyph.size.width)
                 .h(glyph.size.height)
                 .into_any_element(),
-            Some(Err(error)) => failed(&error, &self.source, cx),
+            Some(Err(_error)) => failed(&self.source, cx),
             None => div().h(font).into_any_element(),
         }
     }
@@ -533,7 +541,7 @@ impl Latex {
     /// conversion yet.
     pub fn parse(id: impl Into<ElementId>, source: &str) -> Result<Self, MathError> {
         if let Err(error) = convert(source) {
-            return Err(failed_counted(error));
+            return Err(failed_counted(error, source, false));
         }
         Ok(Self {
             id: id.into(),
@@ -556,24 +564,15 @@ impl Latex {
     }
 }
 
-/// A formula that did not typeset: why, then its source.
-pub(crate) fn failed(error: &MathError, source: &str, cx: &App) -> AnyElement {
+/// A formula that did not typeset: its literal source, nothing else.
+/// The reason is counted and logged once, where it cannot take the note down.
+pub(crate) fn failed(source: &str, cx: &App) -> AnyElement {
     let theme = cx.theme();
     div()
         .debug_selector(|| "latex-error".into())
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .text_color(theme.colors.danger)
-                .child(error.to_string()),
-        )
-        .child(
-            div()
-                .font_family(theme.mono_family.clone())
-                .text_color(theme.colors.fg_muted)
-                .child(source.to_string()),
-        )
+        .font_family(theme.mono_family.clone())
+        .text_color(theme.colors.fg_muted)
+        .child(literal(source))
         .into_any_element()
 }
 

@@ -251,14 +251,14 @@ fn inline_of(inline: &Inline) -> Exported {
         styles: inline
             .styles
             .iter()
-            .map(|(range, style)| (range.clone(), style_of(*style)))
+            .filter_map(|(range, style)| style_of(*style).map(|style| (range.clone(), style)))
             .collect(),
         links: inline.links.clone(),
     }
 }
 
-fn style_of(style: Style) -> ExportedStyle {
-    match style {
+fn style_of(style: Style) -> Option<ExportedStyle> {
+    let style = match style {
         Style::Strong => ExportedStyle::Strong,
         Style::Emphasis => ExportedStyle::Emphasis,
         Style::Strike => ExportedStyle::Strike,
@@ -268,7 +268,10 @@ fn style_of(style: Style) -> ExportedStyle {
         Style::Footnote => ExportedStyle::Footnote,
         Style::Underline => ExportedStyle::Underline,
         Style::Mark => ExportedStyle::Mark,
-    }
+        // Their glyph is already ✓/×; the export's palette has no such style.
+        Style::Pass | Style::Fail => return None,
+    };
+    Some(style)
 }
 
 fn align_of(align: AlignKind) -> Align {

@@ -142,6 +142,14 @@ fn entities_decode_before_structure_and_never_become_markup() {
 }
 
 #[test]
+fn a_zero_width_space_does_not_cut_the_formula() {
+    // The notes glue display formulas to Chinese with U+200B on both sides.
+    let text = line("\u{200b}$x_n$\u{200b}");
+    assert_eq!(text.text, "\u{200b}x_n\u{200b}");
+    assert_eq!(text.styles, [(3..6, Style::Math)]);
+}
+
+#[test]
 fn a_bold_line_keeps_its_quotes() {
     let text = line(r#"**浅紫色**高亮了那些"横跨边界"的数据"#);
     assert_eq!(text.text, r#"浅紫色高亮了那些"横跨边界"的数据"#);
@@ -504,4 +512,15 @@ fn a_lone_pair_stays_text() {
     let text = line("a == b");
     assert_eq!(text.text, "a == b");
     assert!(text.styles.is_empty());
+}
+#[test]
+fn a_mark_keeps_the_formula_after_it_whole() {
+    // The bytes after ✅/❌ must keep their offsets: a shifted span used to
+    // slice `\boxed{…}` into `oxed{…}` and draw the wrong formula.
+    let pass = line("✅ $x_n$");
+    assert_eq!(pass.text, "✓ x_n");
+    assert_eq!(pass.styles, [(0..3, Style::Pass), (4..7, Style::Math)]);
+    let fail = line("❌ $x_n$");
+    assert_eq!(fail.text, "× x_n");
+    assert_eq!(fail.styles, [(0..2, Style::Fail), (3..6, Style::Math)]);
 }
