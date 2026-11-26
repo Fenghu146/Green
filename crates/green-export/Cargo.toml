@@ -1,0 +1,18 @@
+[package]
+name = "green-export"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Green's document blocks as Typst source, PDF, and a PDF audit."
+
+[dependencies]
+anyhow.workspace = true
+green-math = { path = "../green-math" }
+log.workspace = true
+lopdf.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true
