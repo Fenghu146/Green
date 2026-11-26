@@ -43,6 +43,7 @@ scripts/extract-official-lo.sh 用 7zz 把官方镜像的 Frameworks 与 Resourc
 scripts/check.sh [根]            规则检查：入库代码文件不超 500 行（vendor、reference、patches 除外）、agents.md 不超 30000 字节、注释（comments.py）、测试的等待（waits.py）、横幅只有 `doc-fonts`（banners.py）、行尾（eol.sh）；JS、TS、TSX 与 HTML 的注释经 `tests/scripts/comments.mjs` 由官网的 TypeScript、parse5 解析，先在 `site/` 跑 `pnpm install`
 cd site && pnpm run deploy    官网构建并经 wrangler 发到 Cloudflare Workers：另有 `site/worker` 答 `/release.json`（最新版本、安装包地址与下载总数，缓存 5 分钟）并转发 `/releases/` 下的发布文件；地址 https://office.elygpui.com（workers.dev 上同站）
 scripts/deny.sh [根] [检查...]  cargo-deny：安全公告、yanked、许可与来源；重复版本只许 deny.toml 里列着的组，组消失而 skip 还在即败
+scripts/notices.sh [根]          cargo-about 按 about.toml 与 about.hbs 重写 THIRD-PARTY-NOTICES.txt（去掉 CRLF，各平台字节一致）；ci.yml 重跑后 `git diff --exit-code` 核对
 scripts/panics.py [根]          非测试代码的 expect、unwrap、panic!、unreachable!（clippy 量，构建脚本、ely-mail-fake 除外）与 scripts/panics.tsv 逐条相符、各带理由，任一种类不多于 HEAD 的表；clippy 由它自设 `CARGO_CHECK_SHARED_DEPS=0`，编不过时打出编译错；`--sites` 列出本机各处
 cargo check --workspace
 cargo test --workspace     `-p` 的 ely-files、ely-mail、ely-agent 与组件库的包重名，写 `ely-mail@0.1`
