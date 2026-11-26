@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use green_plugins::{Block, Host, Reason, View};
+use green_plugins::{AlertLevel, Block, Host, Reason, View};
 
 /// `python` or `python3`, whichever this machine runs; None skips a test.
 fn python() -> Option<String> {
@@ -20,6 +20,18 @@ fn python() -> Option<String> {
             .unwrap_or(false);
         runs.then(|| name.to_string())
     })
+}
+
+/// `node`, when this machine runs it; None skips a test.
+fn node() -> Option<String> {
+    let runs = Command::new("node")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    runs.then(|| "node".to_string())
 }
 
 /// A plugins folder holding `id`, with `script` and a manifest built by `json`.
@@ -81,6 +93,73 @@ fn the_shipped_csv_plugin_opens_a_csv_as_a_table() {
     assert_eq!(
         view.markdown().expect("Markdown"),
         "| name | qty |\n| --- | --- |\n| apple | 3 |\n| pear | 5 |\n"
+    );
+}
+
+#[test]
+fn the_shipped_log_plugin_speaks_the_same_contract_from_node() {
+    let Some(node) = node() else {
+        eprintln!("skipping: no node on PATH");
+        return;
+    };
+    let root = tempfile::tempdir().expect("a temp dir");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/log");
+    let folder = root.path().join("log");
+    std::fs::create_dir_all(&folder).expect("a folder");
+    std::fs::copy(source.join("log_plugin.js"), folder.join("run.js")).expect("the script");
+    std::fs::write(
+        folder.join("manifest.json"),
+        format!(
+            r#"{{"id": "log", "version": "0.1.0", "apiVersion": 1,
+                "extensions": [".log"], "command": ["{node}", "run.js"]}}"#
+        ),
+    )
+    .expect("a manifest");
+    let host = Host::load(root.path());
+
+    let files = tempfile::tempdir().expect("a temp dir");
+    let log = files.path().join("a.log");
+    std::fs::copy(source.join("sample.log"), &log).expect("a log");
+
+    let view = host.open(&log);
+    assert_eq!(
+        view.blocks().expect("blocks"),
+        [
+            Block::Alert {
+                level: AlertLevel::Warning,
+                text: "1 of 5 lines is an error".into()
+            },
+            Block::Table {
+                aligns: vec![],
+                head: vec!["time".into(), "level".into(), "message".into()],
+                rows: vec![
+                    vec![
+                        "2026-11-26T06:53:45.418Z".into(),
+                        "INFO".into(),
+                        "Green 0.1.17 started".into()
+                    ],
+                    vec![
+                        "2026-11-26T06:53:47.383Z".into(),
+                        "WARN".into(),
+                        "plugin slow ran past its time".into()
+                    ],
+                    vec![
+                        "2026-11-26T06:53:51.901Z".into(),
+                        "ERROR".into(),
+                        "the CSV plugin did not answer".into()
+                    ],
+                    vec![
+                        "2026-11-26T06:53:52.010Z".into(),
+                        "INFO".into(),
+                        "opened data.csv as tab 1".into()
+                    ],
+                ],
+            },
+            Block::Code {
+                language: Some("text".into()),
+                text: "plain line with no level or time".into()
+            },
+        ]
     );
 }
 

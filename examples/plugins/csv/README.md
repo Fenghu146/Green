@@ -4,11 +4,13 @@ Opens `.csv` as a table. Python 3.8 or newer on `PATH`; no packages.
 
 ## Install
 
-Copy this folder to `%APPDATA%\Green\plugins\csv\`:
+Copy this folder to Green's data folder under `plugins\csv\` (on Windows,
+`%LOCALAPPDATA%\Green\green\plugins\csv\` unless the data folder was moved in
+Settings):
 
 ```text
-%APPDATA%\Green\plugins\csv\manifest.json
-%APPDATA%\Green\plugins\csv\csv_plugin.py
+%LOCALAPPDATA%\Green\green\plugins\csv\manifest.json
+%LOCALAPPDATA%\Green\green\plugins\csv\csv_plugin.py
 ```
 
 Green reads the folder at startup. Install = add a folder, uninstall = delete
