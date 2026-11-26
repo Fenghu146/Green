@@ -77,9 +77,5 @@ objc2-foundation.workspace = true
 workspace = true
 
 [[test]]
-name = "media"
-harness = false
-
-[[test]]
 name = "print"
 harness = false

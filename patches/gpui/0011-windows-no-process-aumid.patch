@@ -1,0 +1,28 @@
+baseline: gpui-pre =0.3.14, the version Cargo.toml pins (the crate records no VCS commit; scripts/vendor-gpui.sh holds the tarball hashes)
+bump: If gpui no longer sets a process-wide AppUserModelID, drop this. If that call moved to the installer, rewrite.
+
+windows: no process AppUserModelID
+
+With a process-wide ID, windows pinned to the taskbar did not group
+with the pinned shortcut.
+
+diff --git a/vendor/gpui-pre-windows/src/platform.rs b/vendor/gpui-pre-windows/src/platform.rs
+--- a/vendor/gpui-pre-windows/src/platform.rs
++++ b/vendor/gpui-pre-windows/src/platform.rs
+@@ -901,15 +901,7 @@ impl Platform for WindowsPlatform {
+             return;
+         }
+ 
+-        let identifier_utf16 = windows::core::HSTRING::from(identifier);
+-        // SAFETY: `identifier_utf16` outlives the call and is null-terminated.
+-        if let Err(error) = unsafe {
+-            windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+-                windows::core::PCWSTR(identifier_utf16.as_ptr()),
+-            )
+-        } {
+-            log::warn!("failed to set the process AppUserModelID: {error}");
+-        }
++        // Ely: no process AUMID, so pinned windows group.
+         *self.app_identity.borrow_mut() = Some((identifier.to_string(), name.to_string()));
+     }
+ 

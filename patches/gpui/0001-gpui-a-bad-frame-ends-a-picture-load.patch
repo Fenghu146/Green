@@ -1,0 +1,31 @@
+baseline: gpui-pre =0.3.14, the version Cargo.toml pins (the crate records no VCS commit; scripts/vendor-gpui.sh holds the tarball hashes)
+bump: If `decode_animated_frames` already ends the load with the decoder error, upstream has it: drop this. If that loop is split per format or moved, rewrite rather than replay.
+
+gpui: a bad frame ends a GIF or WebP load
+
+A frame that did not decode was skipped and the loop asked for the
+next; on a damaged file the decoder may never stop. The load now ends
+with the decoder's error (Ely C14.7). Since 0.3.12 GIF and WebP share
+one frame loop, and errors no longer name the source.
+
+diff --git a/vendor/gpui-pre/src/platform.rs b/vendor/gpui-pre/src/platform.rs
+--- a/vendor/gpui-pre/src/platform.rs
++++ b/vendor/gpui-pre/src/platform.rs
+@@ -3494,14 +3494,13 @@ fn decode_animated_frames<'a>(
+                 }
+                 frames.push(frame);
+             }
+-            Err(err) => {
+-                log::debug!("Skipping {format_name} frame due to decode error: {err}");
+-            }
++            // A bad frame ends it: the decoder may never stop.
++            Err(err) => return Err(err.into()),
+         }
+     }
+ 
+     if frames.is_empty() {
+-        anyhow::bail!("{format_name} could not be decoded: all frames failed");
++        anyhow::bail!("{format_name} could not be decoded: no frames");
+     }
+ 
+     Ok(frames)

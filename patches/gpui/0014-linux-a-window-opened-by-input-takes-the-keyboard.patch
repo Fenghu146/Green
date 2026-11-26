@@ -1,0 +1,163 @@
+baseline: gpui-pre =0.3.14, the version Cargo.toml pins (the crate records no VCS commit; scripts/vendor-gpui.sh holds the tarball hashes)
+bump: If `WindowOptions::focus` is honoured on X11 and Wayland, drop this. If activation moved to xdg-activation v2 or the X11 map path changed, rewrite.
+
+linux: a window opened by input takes the keyboard
+
+`WindowOptions::focus` was dropped on Linux: a window opened in answer
+to input took the keyboard only if the window manager or compositor
+gave it unasked, so a slide show opened by F5 left its keys with the
+window behind (Ely R20.39). X11 hands the keyboard over on the first
+MapNotify while the app holds it; Wayland asks by xdg-activation after
+the first commit, as compositors skip unmapped surfaces.
+
+diff --git a/vendor/gpui-pre-linux/src/linux/wayland/window.rs b/vendor/gpui-pre-linux/src/linux/wayland/window.rs
+--- a/vendor/gpui-pre-linux/src/linux/wayland/window.rs
++++ b/vendor/gpui-pre-linux/src/linux/wayland/window.rs
+@@ -143,6 +143,8 @@ pub struct WaylandWindowState {
+     client_inset: Option<Pixels>,
+     client_corner_radii: Corners<Pixels>,
+     accesskit_adapter: Option<accesskit_unix::Adapter>,
++    /// `WindowParams::focus`: asks for the keyboard once mapped.
++    focus: bool,
+ }
+ 
+ pub enum WaylandSurfaceState {
+@@ -612,6 +614,7 @@ impl WaylandWindowState {
+             parent,
+             children: FxHashMap::default(),
+             surface,
++            focus: options.focus,
+             app_id: options.app_id,
+             kde_blur: None,
+             background_effects: None,
+@@ -898,6 +901,38 @@ impl WaylandWindow {
+ }
+ 
+ impl WaylandWindowStatePtr {
++    fn ask_for_keyboard(&self) {
++        let (focus, input) = {
++            let state = self.state.borrow();
++            let focus = state.focus && state.surface_state.toplevel().is_some();
++            (focus, state.client.activation_context().is_some())
++        };
++        if focus && input {
++            log::info!("wayland: a window opened by input asks for the keyboard");
++            self.activate();
++        }
++    }
++
++    fn activate(&self) {
++        let state = self.state.borrow();
++        if let (Some(activation), Some(app_id)) = (&state.globals.activation, state.app_id.clone())
++        {
++            let token = activation.get_activation_token(
++                &state.globals.qh,
++                PendingActivation::Window(state.surface.id()),
++            );
++            token.set_app_id(app_id);
++            // Unpressed, KWin and Mutter mark it urgent instead.
++            if let Some(context) = state.client.activation_context() {
++                token.set_serial(context.serial.as_raw(), &state.globals.seat);
++                token.set_surface(&context.requesting_surface);
++            } else {
++                token.set_surface(&state.surface);
++            }
++            token.commit();
++        }
++    }
++
+     pub fn handle(&self) -> AnyWindowHandle {
+         self.state.borrow().handle
+     }
+@@ -1189,6 +1224,8 @@ impl WaylandWindowStatePtr {
+             update_window(state);
+             if initial_configure {
+                 self.frame(None, FrameRequestSource::NativeCallback);
++                // Mapped now; a window opened by input asks for keys.
++                self.ask_for_keyboard();
+             } else {
+                 self.request_redraw();
+             }
+@@ -1891,25 +1928,7 @@ impl PlatformWindow for WaylandWindow {
+     }
+ 
+     fn activate(&self) {
+-        let state = self.borrow();
+-        if let (Some(activation), Some(app_id)) = (&state.globals.activation, state.app_id.clone())
+-        {
+-            let token = activation.get_activation_token(
+-                &state.globals.qh,
+-                PendingActivation::Window(state.surface.id()),
+-            );
+-            token.set_app_id(app_id);
+-            // Without a recent press the compositor won't grant focus, but still request a
+-            // token: KWin and Mutter mark the window as demanding attention and end their
+-            // launch feedback once the token is passed to `activate`.
+-            if let Some(context) = state.client.activation_context() {
+-                token.set_serial(context.serial.as_raw(), &state.globals.seat);
+-                token.set_surface(&context.requesting_surface);
+-            } else {
+-                token.set_surface(&state.surface);
+-            }
+-            token.commit();
+-        }
++        self.0.activate();
+     }
+ 
+     fn request_attention(&self) {}
+diff --git a/vendor/gpui-pre-linux/src/linux/x11/client.rs b/vendor/gpui-pre-linux/src/linux/x11/client.rs
+--- a/vendor/gpui-pre-linux/src/linux/x11/client.rs
++++ b/vendor/gpui-pre-linux/src/linux/x11/client.rs
+@@ -895,8 +895,23 @@ impl X11Client {
+             }
+             Event::MapNotify(event) => {
+                 let mut state = self.0.borrow_mut();
++                let mut focus = false;
+                 if let Some(window_ref) = state.windows.get_mut(&event.window) {
+                     window_ref.is_mapped = true;
++                    focus = std::mem::take(&mut window_ref.window.state.borrow_mut().focus);
++                }
++                // Holding the keyboard, the app may pass it on.
++                if focus && state.keyboard_focused_window.is_some() {
++                    log::info!("x11: a window opened by input takes the keyboard");
++                    check_reply(
++                        || "X11 SetInputFocus failed.",
++                        state.xcb_connection.set_input_focus(
++                            xproto::InputFocus::PARENT,
++                            event.window,
++                            x11rb::CURRENT_TIME,
++                        ),
++                    )
++                    .log_err();
+                 }
+                 handle_visibility_changed(state, event.window);
+             }
+diff --git a/vendor/gpui-pre-linux/src/linux/x11/window.rs b/vendor/gpui-pre-linux/src/linux/x11/window.rs
+--- a/vendor/gpui-pre-linux/src/linux/x11/window.rs
++++ b/vendor/gpui-pre-linux/src/linux/x11/window.rs
+@@ -292,6 +292,8 @@ pub struct X11WindowState {
+     pub handle: AnyWindowHandle,
+     last_insets: [u32; 4],
+     accesskit_adapter: Option<accesskit_unix::Adapter>,
++    /// `WindowParams::focus`: takes the keyboard on its first map.
++    pub(crate) focus: bool,
+ }
+ 
+ impl X11WindowState {
+@@ -484,6 +486,8 @@ impl X11WindowState {
+         if let WindowKind::AnchoredPopup(_) = params.kind {
+             return Err(PopupNotSupportedError.into());
+         }
++        let focus = params.focus
++            && matches!(params.kind, WindowKind::Normal | WindowKind::Floating | WindowKind::Dialog);
+ 
+         let x_screen_index = params
+             .display_id
+@@ -861,6 +865,7 @@ impl X11WindowState {
+                 last_insets: [0, 0, 0, 0],
+                 edge_constraints: None,
+                 accesskit_adapter: None,
++                focus,
+                 counter_id: sync_request_counter,
+                 last_sync_counter: None,
+             })
