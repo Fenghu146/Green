@@ -107,6 +107,10 @@ pub trait Host: Sized + 'static {
     fn asks_about(&self, _id: u64) -> bool {
         false
     }
+    /// Tab `id` is a page, not a document: no save writes it.
+    fn sealed(&self, _id: u64) -> bool {
+        false
+    }
 
     /// Tab `tab`'s document as last seen; reads and numbered commands.
     fn read_at(&self, _tab: u64, _cx: &App) -> Option<<Self::Engine as Engine>::Doc> {

@@ -47,8 +47,8 @@ pub use counts::{ReadingTime, WordCount};
 pub use diagram::{Diagram, diagram_svg};
 pub use document::{
     Attachment, BlockCommand, DocumentEvent, DocumentHeading, DocumentLook, DocumentTarget,
-    EditRefusal, InlineFormat, LARGEST_READ, MarkdownDocument, TableEdit, TableRefusal,
-    TargetBlock,
+    EditRefusal, InlineFormat, LARGEST_READ, MarkdownDocument, OutlineHeading, TableEdit,
+    TableRefusal, TargetBlock,
 };
 pub use epub::{Chapter, EpubReader};
 pub use format::{Format, format};
@@ -72,7 +72,7 @@ pub use pages::{PageCover, PageIcon};
 pub use picture::{HeldPicture, Pictures};
 pub use print::{Margins, Paper, PrintPreview, PrintSettings, sheet};
 pub use reading::{Footnote, Glossary, ReadingProgress, TooltipTerm, ZenMode};
-pub use render::{MarkdownRenderer, RightPress, inline_math};
+pub use render::{AlertTitles, MarkdownRenderer, RightPress, inline_math};
 pub use rich::RichTextEditor;
 pub use templates::{Template, TemplatePicker};
 pub use thumbs::PageThumbnailList;

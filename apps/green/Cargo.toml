@@ -11,6 +11,8 @@ build = "../../packaging/windows/icon.rs"
 embed-resource.workspace = true
 
 [features]
+# `--capture`: one frame of a document, no window shown (verification and CI).
+capture = ["ely-ui/capture"]
 # Counts text shaping, for the folding measurement (S2).
 shape-count = ["gpui/shape-count"]
 
@@ -25,6 +27,7 @@ ely-ipc.workspace = true
 ely-platform.workspace = true
 ely-ui.workspace = true
 green-plugins.workspace = true
+green-export.workspace = true
 gpui.workspace = true
 log.workspace = true
 futures.workspace = true

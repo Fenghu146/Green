@@ -94,6 +94,7 @@ S2 的证据（缺一项即未完成）：5 万字 K2P p50/p95/p99、>16 ms 占�
 | 改 `ely-office/src/lib.rs` 一行后的增量 | **26.4 s** |
 | `ely-mark.exe` | debug **73.0 MB**；release **40.6 MB** |
 | 能否打开 .md | **能**：`ELY_SMOKE=1` 退出码 0，`opened 作业.md as tab 0` / `window shown`，到首帧 2.2 s |
+| 2026-11-26 补 | `ely-pdf-worker` 与 `ely-pdf-engine` 一并移出 workspace：PDF 阅读已砍，worker 要 MuPDF 引擎，是整仓 `cargo build`/`cargo test` 的唯一阻塞 |
 
 ### 1.4 体积预算（80–100 MB）
 
@@ -105,6 +106,12 @@ S2 的证据（缺一项即未完成）：5 万字 K2P p50/p95/p99、>16 ms 占�
 | 数学字体 + 拉丁字体（OFL/Apache） | ~2 MB |
 | 图标/本地化/杂项 | ~2 MB |
 | 合计 | **~85–93 MB** |
+
+### 1.5 平台（v1 仅 Windows）
+
+v1 的目标平台只有 Windows 10/11 x64（用户定案，2026-11-26）。**非 Windows 目标的编译未验证**：开发机只装了 `x86_64-pc-windows-msvc` 的 std，`cargo check --target x86_64-unknown-linux-gnu` 停在 `can't find crate for core`，而 gpui 的 Linux 依赖（x11 / wayland / xkbcommon）在 Windows 上也装不起来；`--capture` 更是只接 DirectX 的离屏读回。所以 Linux / macOS 既没编过也没跑过，排进 `later.md`，不在 v1 范围。将来要做时先改这一节与 §1 的范围，再谈代码。
+
+已经能确认的只有一点：`ely-ui` 的 `capture` 特性里的 `gpui_windows/test-support` 在 Cargo 的 feature 解析阶段对其他目标不报错（它只在该目标有依赖时生效），`capture.rs` 内部没有任何 `#[cfg(windows)]` 分支。
 
 ## 2. 许可
 
@@ -195,11 +202,17 @@ list item、alert 的 `text`、table cell 都是字符串，不能嵌块——�
 
 ### 5.3 折叠状态是否记忆
 
-**记忆，按文件**：键是「文件绝对路径 + 标题文本路径」，不是行号（标题上下移动不失效）。存放在 `%LOCALAPPDATA%\Green\view-state.json`，**不写进 `.md`，也不在文档旁生成 sidecar**。文件被删/改名 → 该条记录过期丢弃。
+**记忆，按文件**：键是「文件绝对路径 + 标题文本 + 同级序号」，不是行号（标题上下移动不失效；同名标题靠序号区分）。存放在 `%LOCALAPPDATA%\Green\view-state.json`，**不写进 `.md`，也不在文档旁生成 sidecar**。文件被删/改名 → 该条记录过期丢弃。
 
 ### 5.4 性能
 
 折叠/展开改变的是可见集合与后续块的 y 偏移，不得触发任何**文字重排**（re-shape）。S2 验收：5 万字文档，单次折叠 ≤ 16 ms，且测量窗口内 shape 调用次数为 0。
+
+基准单独跑：折叠（5 万字 × 30 次，看 P95 与 shape）与 3000 标题打开大纲这两项是 `#[ignore]` 的基准，只在空载时手动跑，例如 `cargo test --release -p green --features shape-count -- --ignored --nocapture --test-threads=1`；输出带当时的 CPU 负载。debug 只打印数字、不设门禁，门禁只有 release 的 16 ms 与 shape 0。CI 只跑 release 基准，不跑 debug 基准——一个只在并行编译时才会红的测试，会训练所有人忽略红色。
+
+**基准必须串行**（`--test-threads=1`）：shape 计数器（`patches/gpui/0016`、`0017`）是**进程级全局量**，两个基准并行时，3000 标题大纲那项排版出的行会落进折叠的计数窗口，测出 2–27 个假的 shape。本机对照：折叠单独跑 10/10 全 0；同进程与大纲基准并行 20/20 出现成簇非零（形如 `[0,0,2,…]`、`[…,5,20,0]`，CI 的 `[5,20,2]` 同源）；串行 10/10 全 0。这是**测量的作用域问题，不是产品重排**；根治要计数器随窗口（`WindowTextSystem`）而非进程，那归 `patches/gpui` 的 tools 线。
+
+折叠基准在每次 toggle 前驱动一帧，因为真实按压总落在已画出的帧里；连续 toggle、中间不画帧（实测 1/2/8/30 次）shape 也是 0，所以没有"必须每帧刷新"的产品限制要记录。
 
 ## 6. 行内公式（S2 必须先解）
 
@@ -266,6 +279,8 @@ export pdf: pages=12 bytes=845120 fonts=[{"name":"SourceHanSansSC","bytes":41200
 阈值：单页均值 > 500 KB、单字体 > 3 MB、图片占比 > 70%、任一图片覆盖页面积 > 40% → 日志 + 状态栏。
 验收：用户 `作业.md` **≤ 2 MB**、导出 ≤ 10 s、`compressed=true`、`max_image_coverage ≈ 0`、`pdffonts` 全 `sub=yes`，且 `pdffonts` 里每个字体都来自 `assets/fonts/`（出现别的字体即字体漂移，比体积超限更严重）。
 
+**发布阻断项（v1.0 前必须完成）：导出改走 Typst 库。** 现在 app 通过 `typst` 可执行文件导出（`GREEN_TYPST` → exe 旁 → PATH），这是过渡：便携包不带 52 MB 的 CLI，而且"exe 在哪、版本对不对"不该变成用户的问题——离线机器点导出必须能出 PDF。切到 `typst`/`typst-pdf` 库（增量 10–15 MB，见 §1.4 体积预算）后删掉 CLI 这条路。切库之前，找不到 typst 时导出必须明确报错并说明三种办法，不得静默失败。
+
 ## 8. 界面（按 ima 骨架，去掉 AI）
 
 顶栏两行：**标签栏**（§4）+ **工具条**（高 40 px，图标按钮 28×28、圆角 6 px、组间 1 px 分隔线）。
@@ -276,13 +291,13 @@ export pdf: pages=12 bytes=845120 fonts=[{"name":"SourceHanSansSC","bytes":41200
 | 撤销 / 重做 | 同 | `IconButton` + 快捷键绑定 |
 | 格式刷 | 同（复制段落/行内样式） | `IconButton` |
 | 插入▾ | 图片 / 表格 / 公式 / 分隔线 / 代码块 | `menus::DropdownMenu` |
-| B I U S 高亮 颜色 字号（"正文1"） | 同；字号用语义名（正文/标题1–3） | `ToggleButton` / `forms::ColorPicker` / `forms::Select` |
+| B I U S 高亮 颜色 字号（"正文1"） | 同；字号用语义名（正文 / 标题1–6），当前段落那一项打勾 | `ToggleButton` / `forms::ColorPicker` / `forms::Select` |
 | 对齐组 | 左/中/右/两端 | `buttons::SegmentedControl` |
 | 有序/无序/缩进 | 同 | `SegmentedControl` + 两个 `IconButton` |
 | 右侧 查找 / 更多 | 同 | `IconButton` + `DropdownMenu` |
 | ~~AI 写~~ | **不做** | — |
 
-正文：单栏居中，宽度 `48rem`（与基座 `measure` 一致），标题层级字号分明（H1 1.6× / H2 1.35× / H3 1.15×，粗体），块级公式独立成行居中，行内公式随文（§6）。主题深浅两套，取组件库 `Theme`。
+正文：单栏居中，宽度 `48rem`（与基座 `measure` 一致），标题层级字号分明（H1 1.6× / H2 1.35× / H3 1.15× / H4 1.05× / H5 1.0× / H6 0.95×，全部粗体；后三级靠粗细与间距区分），块级公式独立成行居中，行内公式随文（§6）。主题深浅两套，取组件库 `Theme`。
 
 ## 9. 性能
 

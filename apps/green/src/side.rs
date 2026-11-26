@@ -1,12 +1,11 @@
 //! Files, outline and search beside the document (MARK-05, MARK-10).
 
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use ely_gpui_component::{
     buttons::{Button, SegmentedControl},
     feedback::EmptyState,
     forms::{InputEvent, SearchInput, TextInput},
-    layout::ScrollArea,
     lists::{FileTree, ListItem, Outline, SelectableList},
     menus::{ContextMenu, Menu, MenuItem},
     primitives::IconName,
@@ -49,13 +48,26 @@ pub struct Side {
     missed: Vec<(PathBuf, String)>,
     /// A file row's menu; each opens once.
     asked: Option<ely_ui::menu::Offer<PathBuf>>,
+    /// The headings folded in the outline: the panel's own, never the text's.
+    collapsed: HashSet<String>,
+    /// The tab the outline's folds belong to.
+    seen: Option<u64>,
 }
 
 impl Side {
     pub fn new(desk: &Entity<Desk>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // A new shown file is searched again.
         cx.observe(desk, |side, desk, cx| {
-            let (active, listing) = (desk.read(cx).core.active(), desk.read(cx).listings);
+            let read = desk.read(cx);
+            let (active, listing) = (read.core.active(), read.listings);
+            // The outline's folds follow the file in front.
+            if side.seen != active {
+                side.seen = active;
+                let folded = read
+                    .path_of(active)
+                    .map_or_else(Vec::new, |path| read.views.panel(&path));
+                side.collapsed = folded.into_iter().collect();
+            }
             let shown = !side.wide && side.tab != active;
             let listed = side.wide && side.listing != listing;
             if !side.searched.is_empty() && (shown || listed) {
@@ -83,6 +95,8 @@ impl Side {
             listing: 0,
             missed: Vec::new(),
             asked: None,
+            collapsed: HashSet::new(),
+            seen: None,
         }
     }
 
@@ -92,6 +106,16 @@ impl Side {
             self.pane = Pane::Outline;
             cx.notify();
         }
+    }
+
+    /// Whether the outline is the pane shown.
+    pub(crate) fn is_outline(&self) -> bool {
+        self.pane == Pane::Outline
+    }
+
+    /// The tab whose outline folds the side holds.
+    pub(crate) fn seen(&self) -> Option<u64> {
+        self.seen
     }
 
     /// Lines holding the query, off the window.
@@ -299,6 +323,14 @@ impl Side {
         offer.host("mark-file-menu", menu).size_full()
     }
 
+    /// The outline's folded headings, as the view state keeps them.
+    pub(crate) fn collapsed(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.collapsed.iter().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    /// The outline: a tree whose folds are its own, never the text's.
     fn outline(&self, desk: &Entity<Desk>, cx: &mut Context<Self>) -> AnyElement {
         let Some(view) = desk.read(cx).active_view() else {
             return EmptyState::new(
@@ -317,33 +349,87 @@ impl Side {
             )
             .into_any_element();
         }
-        let outline = headings.iter().enumerate().fold(
-            Outline::new("mark-outline"),
-            |outline, (at, heading)| match heading.has_math() {
-                true => outline.drawn(
-                    at.to_string(),
-                    heading.level,
-                    ely_gpui_component::documents::inline_math(("mark-outline-math", at), &heading.runs),
-                ),
-                false => outline.item(at.to_string(), heading.title.clone(), heading.level),
-            },
-        );
-        let outline = outline.on_select(move |key, window, cx| {
-            let Some(heading) = key.parse::<usize>().ok().and_then(|at| headings.get(at)) else {
-                return log::error!("mark: the outline chose no heading");
-            };
-            // The heading in view, the caret on it.
-            let line = heading.line;
-            view.update(cx, |view, cx| view.reveal((line, 0), window, cx));
-        });
-        ScrollArea::new("mark-outline-scroll")
-            .vertical()
+        // The heading nearest above the caret is the one in view.
+        let caret = view.read(cx).place(cx).line as usize;
+        let current = headings
+            .iter()
+            .rev()
+            .find(|heading| heading.line <= caret)
+            .map(|heading| heading.key.clone());
+        let open: Vec<SharedString> = headings
+            .iter()
+            .filter(|heading| heading.opens && !self.collapsed.contains(&heading.key))
+            .map(|heading| SharedString::from(heading.key.clone()))
+            .collect();
+        let headings = std::rc::Rc::new(headings);
+        let side = cx.weak_entity();
+        let folder = desk.downgrade();
+        let outline = headings
+            .iter()
+            .fold(Outline::new("mark-outline"), |outline, heading| {
+                outline.item(
+                    SharedString::from(heading.key.clone()),
+                    heading.title.clone(),
+                    usize::from(heading.depth),
+                )
+            })
+            .open(open);
+        let outline = match current {
+            Some(current) => outline.current(SharedString::from(current)),
+            None => outline,
+        };
+        let outline = outline
+            .on_fold({
+                let (side, folder) = (side.clone(), folder.clone());
+                move |key, open, cx| {
+                    // A press on the triangle folds only the panel's subtree.
+                    side.update(cx, |side, cx| {
+                        if open {
+                            side.collapsed.remove(key.as_ref());
+                        } else {
+                            side.collapsed.insert(key.to_string());
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                    // After the side's update: the desk reads its folds.
+                    folder.update(cx, |desk, cx| desk.remember_panel(cx)).ok();
+                }
+            })
+            .on_select({
+                let headings = headings.clone();
+                let (side, folder, view) = (side, folder, view.clone());
+                move |key, window, cx| {
+                    let Some(at) = headings
+                        .iter()
+                        .position(|heading| heading.key.as_str() == key.as_ref())
+                    else {
+                        return log::warn!("mark: the outline chose no heading");
+                    };
+                    let heading = headings[at].clone();
+                    // The panel opens the heading's ancestors; the text its own.
+                    let opened = side
+                        .update(cx, |side, cx| {
+                            let mut parent = heading.parent;
+                            let mut opened = false;
+                            while let Some(ix) = parent {
+                                opened |= side.collapsed.remove(&headings[ix].key);
+                                parent = headings[ix].parent;
+                            }
+                            cx.notify();
+                            opened
+                        })
+                        .unwrap_or(false);
+                    if opened {
+                        folder.update(cx, |desk, cx| desk.remember_panel(cx)).ok();
+                    }
+                    view.update(cx, |view, cx| view.go(heading.at, heading.line, window, cx));
+                }
+            });
+        div()
+            .debug_selector(|| "mark-outline".into())
             .size_full()
-            .child(
-                div()
-                    .debug_selector(|| "mark-outline".into())
-                    .child(outline),
-            )
+            .child(outline)
             .into_any_element()
     }
 

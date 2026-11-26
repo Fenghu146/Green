@@ -182,9 +182,9 @@ fn rows(menu: &Menu) -> Vec<String> {
 #[gpui::test]
 fn the_paragraph_and_format_menus_follow_typora(cx: &mut TestAppContext) {
     let (desk, cx, _files) = opened("a\n", cx);
-    let menus = desk.read_with(cx, |desk, cx| crate::keys::menus(&desk.look, cx));
+    let menus = desk.read_with(cx, |desk, cx| crate::keys::menus(&desk.look, None, cx));
     let named: Vec<String> = menus.iter().map(|menu| menu.name.to_string()).collect();
-    assert_eq!(named, ["Edit", "Paragraph", "Format", "View"]);
+    assert_eq!(named, ["Edit", "Paragraph", "Format", "View", "Help"]);
     let table = [
         "Insert Table",
         "-",
@@ -206,14 +206,14 @@ fn the_paragraph_and_format_menus_follow_typora(cx: &mut TestAppContext) {
         "Delete Table",
     ];
     let mut paragraph: Vec<String> = [
+        "Paragraph",
+        "-",
         "Heading 1",
         "Heading 2",
         "Heading 3",
         "Heading 4",
         "Heading 5",
         "Heading 6",
-        "-",
-        "Paragraph",
         "-",
         "Increase Heading Level",
         "Decrease Heading Level",
@@ -267,6 +267,16 @@ fn keys(action: &dyn Action, cx: &mut VisualTestContext) -> String {
             .collect();
         strokes.join(" ")
     })
+}
+
+#[gpui::test]
+fn a_link_from_the_caret_takes_the_address_inside_its_parentheses(cx: &mut TestAppContext) {
+    let (desk, cx, _files) = opened("alpha beta\n", cx);
+    press("secondary-k", cx);
+    assert_eq!(current(&desk, cx), "[]()alpha beta\n");
+    // The caret sits between the parentheses, where the address goes.
+    let caret = document(&desk, cx).read_with(cx, |document, cx| document.caret(cx));
+    assert_eq!(caret, (0, 3));
 }
 
 #[cfg(target_os = "windows")]

@@ -1,8 +1,10 @@
 //! Typora's Paragraph and Format menus at the caret (MARK-15).
 
+use std::rc::Rc;
+
 use ely_gpui_component::secondary;
 use ely_gpui_component::{
-    documents::{BlockCommand, EditRefusal, InlineFormat, MarkdownDocument, TableRefusal},
+    documents::{BlockCommand, EditRefusal, InlineFormat, MarkdownDocument, TableRefusal, TargetBlock},
     primitives::Severity,
 };
 use ely_office::prelude::*;
@@ -80,41 +82,66 @@ pub fn bind(cx: &mut App) {
     ]);
 }
 
-pub fn paragraph_menu(cx: &App) -> Menu {
-    let item = |key: &str, action: Box<dyn Action>| item(key, action, cx);
+pub fn paragraph_menu(style: Option<TargetBlock>, cx: &App) -> Menu {
+    let item = |key: &str, action: Box<dyn Action>, on: bool| crate::keys::checked(key, action, on, cx);
+    let at = |kind: TargetBlock| style == Some(kind);
     Menu::new(text(cx, "mark.menu.paragraph", &[])).items([
-        item("mark.block.h1", Box::new(Heading1)),
-        item("mark.block.h2", Box::new(Heading2)),
-        item("mark.block.h3", Box::new(Heading3)),
-        item("mark.block.h4", Box::new(Heading4)),
-        item("mark.block.h5", Box::new(Heading5)),
-        item("mark.block.h6", Box::new(Heading6)),
+        item("mark.block.paragraph", Box::new(Paragraph), at(TargetBlock::Paragraph)),
         MenuItem::separator(),
-        item("mark.block.paragraph", Box::new(Paragraph)),
+        item("mark.block.h1", Box::new(Heading1), at(TargetBlock::Heading(1))),
+        item("mark.block.h2", Box::new(Heading2), at(TargetBlock::Heading(2))),
+        item("mark.block.h3", Box::new(Heading3), at(TargetBlock::Heading(3))),
+        item("mark.block.h4", Box::new(Heading4), at(TargetBlock::Heading(4))),
+        item("mark.block.h5", Box::new(Heading5), at(TargetBlock::Heading(5))),
+        item("mark.block.h6", Box::new(Heading6), at(TargetBlock::Heading(6))),
         MenuItem::separator(),
-        item("mark.block.promote", Box::new(Promote)),
-        item("mark.block.demote", Box::new(Demote)),
+        item("mark.block.promote", Box::new(Promote), false),
+        item("mark.block.demote", Box::new(Demote), false),
         MenuItem::separator(),
         MenuItem::submenu(crate::tools::table_menu(cx)),
-        item("mark.block.math", Box::new(MathBlock)),
-        item("mark.block.code", Box::new(CodeFences)),
+        item("mark.block.math", Box::new(MathBlock), false),
+        item("mark.block.code", Box::new(CodeFences), false),
         MenuItem::separator(),
-        item("mark.block.quote", Box::new(Quote)),
+        item("mark.block.quote", Box::new(Quote), false),
         MenuItem::separator(),
-        item("mark.block.ordered", Box::new(OrderedList)),
-        item("mark.block.bullet", Box::new(BulletList)),
-        item("mark.block.task", Box::new(TaskList)),
+        item("mark.block.ordered", Box::new(OrderedList), false),
+        item("mark.block.bullet", Box::new(BulletList), false),
+        item("mark.block.task", Box::new(TaskList), false),
         MenuItem::separator(),
-        item("mark.block.before", Box::new(ParagraphBefore)),
-        item("mark.block.after", Box::new(ParagraphAfter)),
+        item("mark.block.before", Box::new(ParagraphBefore), false),
+        item("mark.block.after", Box::new(ParagraphAfter), false),
         MenuItem::separator(),
-        item("mark.block.link_reference", Box::new(LinkReference)),
-        item("mark.block.footnote", Box::new(Footnote)),
+        item("mark.block.link_reference", Box::new(LinkReference), false),
+        item("mark.block.footnote", Box::new(Footnote), false),
         MenuItem::separator(),
-        item("mark.block.rule", Box::new(Rule)),
-        item("mark.block.toc", Box::new(Toc)),
-        item("mark.block.front_matter", Box::new(FrontMatter)),
+        item("mark.block.rule", Box::new(Rule), false),
+        item("mark.block.toc", Box::new(Toc), false),
+        item("mark.block.front_matter", Box::new(FrontMatter), false),
     ])
+}
+
+/// The toolbar's style list: 正文 and the six headings, the caret's one ticked.
+pub fn paragraph_dropdown(
+    style: Option<TargetBlock>,
+    cx: &App,
+) -> ely_gpui_component::menus::Menu {
+    use ely_gpui_component::menus::MenuItem as Row;
+    let row = |key: &str, action: Box<dyn Action>, on: bool| {
+        let action = Rc::new(action);
+        let again = Rc::clone(&action);
+        Row::check(text(cx, key, &[]), on).on_click(move |window, cx| {
+            window.dispatch_action(again.boxed_clone(), cx)
+        })
+    };
+    let at = |kind: TargetBlock| style == Some(kind);
+    ely_gpui_component::menus::Menu::new()
+        .item(row("mark.block.paragraph", Box::new(Paragraph), at(TargetBlock::Paragraph)))
+        .item(row("mark.block.h1", Box::new(Heading1), at(TargetBlock::Heading(1))))
+        .item(row("mark.block.h2", Box::new(Heading2), at(TargetBlock::Heading(2))))
+        .item(row("mark.block.h3", Box::new(Heading3), at(TargetBlock::Heading(3))))
+        .item(row("mark.block.h4", Box::new(Heading4), at(TargetBlock::Heading(4))))
+        .item(row("mark.block.h5", Box::new(Heading5), at(TargetBlock::Heading(5))))
+        .item(row("mark.block.h6", Box::new(Heading6), at(TargetBlock::Heading(6))))
 }
 
 pub fn format_menu(cx: &App) -> Menu {

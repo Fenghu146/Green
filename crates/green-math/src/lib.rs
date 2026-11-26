@@ -110,9 +110,12 @@ const SYMBOLS: &[(&str, &str)] = &[
     ("lambda", "lambda"),
     ("mu", "mu"),
     ("pi", "pi"),
+    ("rho", "rho"),
+    ("varepsilon", "epsilon.alt"),
     ("sigma", "sigma"),
     ("phi", "phi"),
     ("omega", "omega"),
+    ("nabla", "nabla"),
     ("Gamma", "Gamma"),
     ("Delta", "Delta"),
     ("Theta", "Theta"),
@@ -204,7 +207,7 @@ pub fn whitelisted(name: &str) -> bool {
         || matches!(
             name,
             "frac" | "dfrac" | "sqrt" | "text" | "boxed" | "left" | "right" | "mathbb" | "begin"
-                | "end"
+                | "end" | "vec"
         )
 }
 
@@ -381,6 +384,11 @@ impl<'a> Reader<'a> {
                 let inner = self.atom();
                 // The frame's style is the preamble's: this layer knows no theme.
                 format!("#gbox[${inner}$]")
+            }
+            // An accent over its argument, as Typst draws one.
+            "vec" => {
+                let inner = self.atom();
+                format!("arrow({inner})")
             }
             // Typst sizes delimiters by itself; the parens stay.
             "left" => {

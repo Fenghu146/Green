@@ -3,6 +3,7 @@
 mod address;
 mod files;
 mod html;
+mod pdf;
 mod pictures;
 mod plain;
 #[cfg(test)]
@@ -11,10 +12,16 @@ mod tests;
 use std::{io, path::Path};
 
 use ely_gpui_component::documents::markdown_tree;
+use gpui::App;
 
 pub use files::{Format, Target, write};
 pub use pictures::{Pictures, picture_file};
 pub use plain::plain;
+
+/// The five alert titles, in the window's language, in `AlertKind`'s order.
+pub fn alerts(cx: &App) -> [String; 5] {
+    ely_gpui_component::documents::AlertTitles::current(cx).map(|title| title.to_string())
+}
 
 /// A page and what it could not carry.
 #[derive(Debug, Default)]
@@ -26,6 +33,8 @@ pub struct Page {
     pub diagrams: Vec<usize>,
     /// Lines of formulas kept as code, and why.
     pub formulas: Vec<(usize, String)>,
+    /// Formulas a PDF kept as their TeX, as the export named them.
+    pub formulas_kept: Vec<String>,
 }
 
 /// The page's look: light, as printed.

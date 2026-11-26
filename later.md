@@ -6,6 +6,7 @@
 
 - **界面风格后续调整，会有我们自己的设计语言**（用户原话）。S1 的骨架照搬基座视觉；用户评价「和 ElyMark 差不多，完成度不错」。未来重做的是设计语言，不是布局——执行期不要动视觉。
 - 菜单栏保留（用户定案，2026-11-26）；左侧栏「文件」页签保留。顶栏维持现状，不做两行。
+- 插入菜单不照搬 ima 的「录音纪要 / 附件 / 笔记」：那是笔记产品功能（录音转写、附件库、笔记互链），不是 Markdown 编辑器的事。
 
 ## 大纲
 
@@ -18,3 +19,12 @@
 ## 插件
 
 - 列表项、alert 正文、表格单元格内嵌 Block。v1 的 Block 契约把它们定成字符串；要做就是 `apiVersion += 1`，并按约定保留 v1 两个小版本。
+
+## 打包与便携
+
+- 便携模式（`<exe>/data` 存在即用）现在是 `apps/green/src/portable.rs` 的产品策略，`crates/` 层不知道“便携”这个概念。若将来多个 app 共用这套策略，再把它上移进 `ely-platform`。
+
+## 平台
+
+- Linux / macOS 目标。v1 只做 Windows（`docs/design.md` §1.5），非 Windows 的编译与运行都没验过；`--capture` 只接 DirectX 的离屏读回。要做先改 §1.5 的范围。
+- `ely-platform/src/diagnostics.rs:47` 仍把 `AppId::Pdf` 映射到 `"ely-pdf-worker"`，而 `ely-pdf-engine` / `ely-pdf-worker` 都已移出 workspace。它现在只是日志里的一个字符串，不影响行为；删 Pdf app 时一并去掉。

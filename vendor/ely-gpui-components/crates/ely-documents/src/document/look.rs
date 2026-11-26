@@ -2,7 +2,7 @@
 
 use gpui::{Context, Rems, SharedString};
 
-use super::MarkdownDocument;
+use super::{MarkdownDocument, TargetBlock};
 use crate::MarkdownMode;
 use crate::editor::LineNumbers;
 
@@ -67,6 +67,14 @@ impl MarkdownDocument {
             Some(open) => self.block_at(open.range.start),
             None => self.block_at(self.editor.read(cx).primary().head),
         }
+    }
+
+    /// The kind of the block at the caret, or the one open.
+    pub fn block_kind(&self, cx: &gpui::App) -> Option<TargetBlock> {
+        self.parsed
+            .blocks
+            .get(self.current_block(cx))
+            .map(|block| block.kind)
     }
 
     /// Half a view of room at each end, for typewriter.

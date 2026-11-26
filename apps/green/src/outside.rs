@@ -40,6 +40,8 @@ pub enum Outside {
 /// What ElyMark keeps per tab.
 pub struct Extra {
     pub outside: Outside,
+    /// A page, not a document: read-only, unsaved, kept out of the session.
+    pub special: bool,
     /// The text as last loaded or saved: the merge base.
     pub base: String,
     pub policy: PolicyEngine,
@@ -90,6 +92,7 @@ impl Default for Extra {
     fn default() -> Self {
         Extra {
             outside: Outside::Clear,
+            special: false,
             base: String::new(),
             policy: PolicyEngine::new(Policy::MarkAutoSave, false),
             heard: 0,

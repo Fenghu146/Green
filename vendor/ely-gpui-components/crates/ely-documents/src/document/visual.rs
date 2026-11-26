@@ -10,8 +10,8 @@ use crate::{
     forms::{self, Down, SelectDown, SelectUp, Up},
     i18n,
     layout::{ScrollSource, Scrollbar},
-    primitives::FocusRing as _,
-    theme::{ActiveTheme, Radius, TextSize, Theme},
+    primitives::{FocusRing as _, Triangle},
+    theme::{ActiveTheme, IconSize, Radius, TextSize, Theme},
     {
         MarkdownMode, TargetBlock,
         render::{
@@ -122,16 +122,17 @@ impl MarkdownDocument {
     }
 
     /// A block, or the end.
-    fn block_item(&mut self, ix: usize, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn block_item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let editing = self.mode == MarkdownMode::Visual;
         let drawn = editing && ix < self.parsed.blocks.len();
         let on_point = drawn.then(|| self.on_point(ix, cx));
         let theme = cx.theme();
         let colors = theme.colors.clone();
-        let (radius, body, mono) = (
+        let (radius, body, mono, mark) = (
             theme.radius(Radius::Md),
             theme.text_size(TextSize::Base) * self.look.scale,
             theme.mono_family.clone(),
+            theme.icon_size(IconSize::Sm).to_pixels(window.rem_size()),
         );
         // Focus fades all but the reader's block.
         let faded = self.look.focus && editing_mode(self.mode) && ix != self.current_block(cx);
@@ -145,6 +146,10 @@ impl MarkdownDocument {
                 (_, false) => div().into_any_element(),
             };
         };
+        // A folded heading's blocks draw nothing and take no room.
+        if self.folds.hidden(ix) {
+            return div().into_any_element();
+        }
         if let Some(open) = open.filter(|open| open.cell.is_none() && !open.append) {
             let range = &open.range;
             if range.start == block.range.start {
@@ -229,6 +234,40 @@ impl MarkdownDocument {
                     (false, false),
                 ))
             }
+        };
+        // A heading with blocks under it shows its fold at its line's end.
+        let shown = match self.fold_head(ix) {
+            Some((_, _, true, folded)) => {
+                let toggle = div()
+                    .id(("fold", ix))
+                    .debug_selector(move || format!("markdown-fold-{ix}"))
+                    .role(Role::Button)
+                    .flex_none()
+                    .pt_1()
+                    .px_1()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(colors.hover))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |document, _: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            document.toggle_fold(ix, window, cx);
+                        }),
+                    )
+                    .child(
+                        Triangle::new(!folded)
+                            .size(mark)
+                            .color(colors.fg_subtle),
+                    );
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_1()
+                    .child(div().flex_1().min_w_0().child(shown))
+                    .child(toggle)
+            }
+            _ => shown,
         };
         // A match no drawn text shows washes its whole block.
         let missed = found.missed();

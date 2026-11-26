@@ -22,6 +22,7 @@ use crate::{
 };
 
 mod blocks;
+pub use blocks::AlertTitles;
 mod found;
 mod math_text;
 mod point;
@@ -176,14 +177,16 @@ pub(crate) struct Hooks<'a> {
 /// Headings and strong text share one weight.
 pub(crate) const HEAVY: FontWeight = FontWeight::BOLD;
 
-/// Typora's heading steps over the body.
+/// Typora's heading steps over the body (design §8); the last three read by
+/// weight and spacing more than size.
 pub(crate) fn heading_step(level: u8) -> f32 {
     match level {
-        1 => 2.25,
-        2 => 1.75,
-        3 => 1.5,
-        4 => 1.25,
-        _ => 1.0,
+        1 => 1.6,
+        2 => 1.35,
+        3 => 1.15,
+        4 => 1.05,
+        5 => 1.0,
+        _ => 0.95,
     }
 }
 

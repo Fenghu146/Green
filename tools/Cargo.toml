@@ -1,0 +1,21 @@
+[package]
+name = "green-tools"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Fixtures and the §9 measurement scaffolding; no product code."
+
+# Standalone: the product workspace lists apps/* and crates/* as members,
+# and adding a member is the mainline's call. No dependencies, so the
+# licence and advisory scans never see this tree.
+[workspace]
+
+[[bin]]
+name = "fixtures"
+path = "src/bin/fixtures.rs"
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"

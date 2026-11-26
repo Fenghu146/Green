@@ -1,5 +1,6 @@
 //! Modes, menus and keys, as Typora's (MARK-01, MARK-02, MARK-15).
 
+use ely_gpui_component::documents::TargetBlock;
 use ely_gpui_component::secondary;
 use ely_ui::{commands, i18n::text};
 use gpui::{Action, App, Context, InteractiveElement as _, KeyBinding, Menu, MenuItem, actions};
@@ -8,7 +9,15 @@ use crate::{desk::Desk, view::Mode};
 
 actions!(
     mark,
-    [VisualMode, SourceMode, PreviewMode, ToggleSource, CheckDisk]
+    [
+        VisualMode,
+        SourceMode,
+        PreviewMode,
+        ToggleSource,
+        ToggleOutline,
+        CheckDisk,
+        OpenLicenses
+    ]
 );
 
 pub fn bind(cx: &mut App) {
@@ -17,6 +26,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new(secondary!("/"), ToggleSource, at),
         // Over the code editor's `//` toggle.
         KeyBinding::new(secondary!("/"), ToggleSource, Some("ElyEditor")),
+        // Design §5.2: the outline opens and closes from the keyboard.
+        KeyBinding::new(secondary!("shift-o"), ToggleOutline, at),
         KeyBinding::new("f8", crate::look::FocusMode, at),
         KeyBinding::new("f9", crate::look::Typewriter, at),
         KeyBinding::new(secondary!("+"), crate::look::Larger, at),
@@ -52,7 +63,7 @@ pub(crate) fn item(key: &str, action: Box<dyn Action>, cx: &App) -> MenuItem {
     checked(key, action, false, cx)
 }
 
-pub fn menus(look: &crate::look::Look, cx: &App) -> Vec<Menu> {
+pub fn menus(look: &crate::look::Look, style: Option<TargetBlock>, cx: &App) -> Vec<Menu> {
     use crate::look::{self, Font, Width};
     let checked = |key: &str, action: Box<dyn Action>, on: bool| checked(key, action, on, cx);
     let item = |key: &str, action: Box<dyn Action>| item(key, action, cx);
@@ -66,7 +77,7 @@ pub fn menus(look: &crate::look::Look, cx: &App) -> Vec<Menu> {
             MenuItem::separator(),
             item("office.find.open", Box::new(ely_office::FindReplace)),
         ]),
-        crate::blocks::paragraph_menu(cx),
+        crate::blocks::paragraph_menu(style, cx),
         crate::blocks::format_menu(cx),
         Menu::new(text(cx, "menu.view", &[])).items([
             item("mark.view.source", Box::new(ToggleSource)),
@@ -130,6 +141,8 @@ pub fn menus(look: &crate::look::Look, cx: &App) -> Vec<Menu> {
             MenuItem::separator(),
             item("mark.outside.check", Box::new(CheckDisk)),
         ]),
+        Menu::new(text(cx, "menu.help", &[]))
+            .items([item("menu.help.licenses", Box::new(OpenLicenses))]),
     ]
 }
 
@@ -146,11 +159,26 @@ impl Desk {
         self.switch(mode, window, cx);
     }
 
+    /// Shows the outline, or folds the side away when it already shows.
+    fn toggle_outline(&mut self, cx: &mut Context<Self>) {
+        if !ely_ui::settings::panels::shown(true, cx) {
+            ely_ui::settings::panels::show(true, true, cx);
+            self.side
+                .update(cx, |side, cx| side.show_outline(cx));
+        } else if !self.side.read(cx).is_outline() {
+            self.side.update(cx, |side, cx| side.show_outline(cx));
+        } else {
+            ely_ui::settings::panels::show(true, false, cx);
+        }
+    }
+
     pub fn mode_actions(root: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
         root.on_action(cx.listener(|desk, _: &CheckDisk, _, cx| desk.check_disk(cx)))
+            .on_action(cx.listener(|desk, _: &OpenLicenses, _, cx| desk.open_licenses(cx)))
             .on_action(
                 cx.listener(|desk, _: &ToggleSource, window, cx| desk.toggle_source(window, cx)),
             )
+            .on_action(cx.listener(|desk, _: &ToggleOutline, _, cx| desk.toggle_outline(cx)))
             .on_action(
                 cx.listener(|desk, _: &VisualMode, window, cx| {
                     desk.switch(Mode::Visual, window, cx)

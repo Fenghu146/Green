@@ -78,6 +78,11 @@ const EN: &[(&str, &str)] = &[
     ("menu.edit", "Edit"),
     ("menu.view", "View"),
     ("menu.insert", "Insert"),
+    ("menu.help", "Help"),
+    ("menu.help.licenses", "Licences…"),
+    ("licenses.title", "Licences"),
+    ("licenses.fonts", "Fonts"),
+    ("licenses.crates", "Third-party crates"),
     ("command.file.new", "New"),
     ("command.file.new_window", "New Window"),
     ("command.file.open", "Open…"),
@@ -151,6 +156,11 @@ const ZH_CN: &[(&str, &str)] = &[
     ("menu.edit", "编辑"),
     ("menu.view", "视图"),
     ("menu.insert", "插入"),
+    ("menu.help", "帮助"),
+    ("menu.help.licenses", "许可与第三方声明…"),
+    ("licenses.title", "许可与第三方声明"),
+    ("licenses.fonts", "字体"),
+    ("licenses.crates", "第三方 crate"),
     ("command.file.new", "新建"),
     ("command.file.new_window", "新建窗口"),
     ("command.file.open", "打开…"),
@@ -230,6 +240,12 @@ pub fn install_as(locale: &'static str, cx: &mut App) {
             .catalog("fr-FR", &fr)
             .catalog("de-DE", &de),
     );
+    // Alerts in a document speak the same language; the component library
+    // keeps GitHub's English until titles are set here.
+    cx.set_global(ely_gpui_component::documents::AlertTitles(
+        ["note", "tip", "important", "warning", "caution"]
+            .map(|kind| text(cx, &format!("mark.alert.{kind}"), &[])),
+    ));
 }
 
 /// Keys and messages of one language.

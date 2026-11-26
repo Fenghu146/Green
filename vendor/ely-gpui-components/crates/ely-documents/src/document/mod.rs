@@ -4,6 +4,7 @@ mod block;
 mod cells;
 mod edit;
 mod finding;
+mod fold;
 mod format;
 mod lists;
 mod look;
@@ -19,7 +20,7 @@ mod visual;
 
 pub(crate) use visual::bind_keys;
 
-use std::{ops::Range, path::Path, rc::Rc, sync::Arc, time::Duration};
+use std::{collections::HashSet, ops::Range, path::Path, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, ListAlignment,
@@ -29,8 +30,10 @@ use gpui::{
 pub use crate::tree::DocumentHeading;
 pub use attach::Attachment;
 pub use block::BlockCommand;
+pub use fold::OutlineHeading;
 pub use format::{EditRefusal, InlineFormat};
 pub use look::DocumentLook;
+use fold::Folds;
 use parse::{Parsed, alike, parsed};
 pub use point::{DocumentTarget, TargetBlock};
 pub use tables::{TableEdit, TableRefusal};
@@ -62,6 +65,8 @@ pub enum DocumentEvent {
     Changed,
     /// A new read of the text: blocks and headings.
     Parsed,
+    /// Headings folded or unfolded.
+    Folded,
     /// A secondary press moved the caret onto this.
     Pointed(DocumentTarget),
     /// A long format, accepted, did not happen.
@@ -105,6 +110,10 @@ pub struct MarkdownDocument {
     mode: MarkdownMode,
     base: Option<Arc<Path>>,
     parsed: Arc<Parsed>,
+    /// Folded headings, by key; a file's view state keeps these.
+    folded: HashSet<String>,
+    /// What those folds hide, and where each heading ends.
+    folds: Folds,
     /// Text changes counted; a read of an older one lapses.
     edits: u64,
     _parsing: Option<Task<()>>,
@@ -199,6 +208,8 @@ impl MarkdownDocument {
             mode,
             base: None,
             parsed: Arc::default(),
+            folded: HashSet::new(),
+            folds: Folds::default(),
             edits: 0,
             _parsing: None,
             editing: false,
@@ -400,6 +411,7 @@ impl MarkdownDocument {
         self.editor
             .update(cx, |editor, _| editor.set_anchors(headings));
         self.parsed = Arc::new(read);
+        self.refold();
         cx.emit(DocumentEvent::Parsed);
         cx.notify();
     }

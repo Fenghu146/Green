@@ -92,6 +92,10 @@ fn the_whitelist_maps_as_the_design_table_says() {
     assert_eq!(typst("x^{2}"), "x^2");
     assert_eq!(typst("x^{n-1}"), "x^(n - 1)");
     assert_eq!(typst("\\boxed{x}"), "#gbox[$x$]");
+    assert_eq!(typst("\\nabla"), "nabla");
+    assert_eq!(typst("\\rho"), "rho");
+    assert_eq!(typst("\\varepsilon"), "epsilon.alt");
+    assert_eq!(typst("\\vec{E}"), "arrow(E)");
 }
 
 #[test]
@@ -167,6 +171,8 @@ fn every_covered_sample_compiles_in_typst() {
             "\\sqrt[3]{x}",
             "\\text{不溢出}",
             "\\boxed{x}",
+            "\\vec{E}",
+            "\\nabla \\cdot \\vec{E} = \\frac{\\rho}{\\varepsilon_0}",
             "\\left(\\frac{2}{5}\\right)^{n-1}",
             "\\{ \\} \\% \\_ \\& \\# \\$ \\\\",
             "R型",

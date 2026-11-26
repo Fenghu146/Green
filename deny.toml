@@ -1,4 +1,9 @@
 # cargo-deny: licences, advisories, duplicates, sources.
+#
+# The licence list is a whitelist: anything not named here fails. AGPL is denied
+# outright (docs/design.md §2). MPL is not in the whitelist either; the seven MPL
+# crates already in the graph are named one by one below, so a new MPL dependency
+# fails until someone decides it can meet MPL's file-level obligations.
 
 [graph]
 all-features = true
@@ -7,9 +12,26 @@ all-features = true
 unmaintained = "workspace"
 unsound = "all"
 yanked = "deny"
-ignore = []
+# Three ignored advisories, each with the reason it is not a fix we can make:
+#
+# - RUSTSEC-2026-0194 / 0195: quick-xml 0.38.4, pinned by citationberg <-
+#   hayagriva <- typst-library. XML denial of service. Green hands typst no
+#   user-supplied XML, and the fix is a typst release that moves hayagriva off
+#   citationberg 0.7 — that bump is the mainline's call. Review when typst moves.
+#
+# - RUSTSEC-2026-0192: ttf-parser 0.25.1 is unmaintained, not vulnerable. It is
+#   pulled by fontdb <- cosmic-text <- gpui's wgpu backend, and that gpui is the
+#   vendored copy under vendor/ (patches/gpui owns it), so the swap is ours to
+#   make only when gpui's own pin moves. Review with that pin.
+ignore = [
+    { id = "RUSTSEC-2026-0194", reason = "quadratic scan of a start tag, inside typst's citationberg; no untrusted XML reaches it" },
+    { id = "RUSTSEC-2026-0195", reason = "unbounded namespace declarations, same path; fixed by a typst bump" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained, not vulnerable; it arrives through fontdb <- cosmic-text <- gpui''s wgpu backend, which lives in vendor/ and is not ours to swap" },
+]
 
 [licenses]
+# OFL-1.1 is here for the fonts that ship beside the binary, not for a crate:
+# cargo-deny will keep reporting it as an unmatched allowance, which is expected.
 allow = [
     "0BSD",
     "Apache-2.0",
@@ -18,24 +40,52 @@ allow = [
     "BSD-3-Clause",
     "BSL-1.0",
     "CC0-1.0",
+    "CDLA-Permissive-2.0",
     "ISC",
     "MIT",
     "MIT-0",
-    "MPL-2.0",
+    "OFL-1.1",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
 ]
+# No deny list: cargo-deny 0.22 removed `[licenses] deny` in favour of this
+# whitelist, so every licence not named above fails. That covers AGPL-3.0-only /
+# -or-later by construction, and MPL-2.0 except for the crates named below.
 confidence-threshold = 0.93
 
-# Mozilla's root store data; the text ships in each crate.
+
+# MPL-2.0 is GPL-compatible and its obligations are met by shipping the sources,
+# which crates.io holds under the same version. Each is named so the pattern does
+# not spread: dwrote, option-ext and selectors/cssparser reach the binary; cbindgen
+# builds host tools only.
 [[licenses.exceptions]]
-crate = "webpki-roots"
-allow = ["CDLA-Permissive-2.0"]
+crate = "cbindgen"
+allow = ["MPL-2.0"]
 
 [[licenses.exceptions]]
-crate = "webpki-root-certs"
-allow = ["CDLA-Permissive-2.0"]
+crate = "cssparser"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "cssparser-macros"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "dtoa-short"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "dwrote"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "option-ext"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "selectors"
+allow = ["MPL-2.0"]
 
 [licenses.private]
 ignore = true
@@ -62,10 +112,13 @@ skip = [
     "dirs",
     "dirs-sys",
     "ely-files",
+    "fancy-regex",
+    "fearless_simd",
     "foldhash",
     "font-types",
     "getrandom",
     "hashbrown",
+    "hayro-ccitt",
     "heck",
     "inout",
     "jni",
@@ -84,7 +137,9 @@ skip = [
     "png",
     "pollster",
     "quick-error",
+    "quick-xml",
     "rand",
+    "rand_chacha",
     "rand_core",
     "read-fonts",
     "redox_users",
@@ -96,13 +151,17 @@ skip = [
     "sha2",
     "skrifa",
     "spin",
+    "strum",
+    "strum_macros",
     "syn",
     "synstructure",
     "thiserror",
     "thiserror-impl",
+    "tiny-skia-path",
     "toml",
     "toml_datetime",
     "toml_edit",
+    "usvg",
     "weezl",
     "windows_aarch64_gnullvm",
     "windows_aarch64_msvc",
@@ -122,4 +181,3 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/ELY-Open-Source/Ely-GPUI-Components"]

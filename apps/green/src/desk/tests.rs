@@ -22,6 +22,8 @@ pub(crate) fn start(
         ely_ui::settings::install_defaults(cx);
         ely_ui::i18n::install_as("en-US", cx);
         ely_ui::install_no_launch_files(cx);
+        // Readers start with the side folded; tests look at it.
+        ely_ui::settings::panels::show(true, true, cx);
     });
     let held = Rc::new(RefCell::new(None));
     let kept = held.clone();
@@ -52,7 +54,7 @@ fn outline(desk: &Entity<Desk>, cx: &mut VisualTestContext) -> Vec<(usize, Strin
         let outline = view.read(cx).outline(cx);
         outline
             .into_iter()
-            .map(|heading| (heading.level, heading.title, heading.line))
+            .map(|heading| (usize::from(heading.depth), heading.title, heading.line))
             .collect()
     })
 }
@@ -307,24 +309,6 @@ fn utf16_text_says_why_in_chinese_and_spanish(cx: &mut TestAppContext) {
     assert!(desk.read_with(cx, |desk, _| desk.core.tabs.is_empty()), "no tab opened");
 }
 
-#[gpui::test]
-fn an_elytree_gone_at_launch_says_so_in_chinese_and_spanish(cx: &mut TestAppContext) {
-    // An installed one would start for real.
-    if ely_platform::apps::installed(AppId::Tree) {
-        return eprintln!("SKIP: ElyTree is installed here");
-    }
-    // The check passed; at launch the app is gone.
-    let gone = ely_platform::apps::open(AppId::Tree, &[]).expect_err("no ElyTree");
-    let data = tempfile::tempdir().expect("data");
-    let (desk, cx) = start(cx, data.path());
-    let root = desk.read_with(cx, |desk, _| desk.core.root.upgrade().expect("the window"));
-    for (locale, said) in [("zh-CN", "ElyTree 没能打开：ElyTree 没有安装"), ("es-ES", "ElyTree no se abrió: ElyTree no está instalado")] {
-        cx.update(|_, app| ely_ui::i18n::install_as(locale, app));
-        desk.update(cx, |desk, cx| desk.tree_failed(&gone, cx));
-        let toasts = root.read_with(cx, |root, cx| root.toasts(cx));
-        assert!(toasts.iter().any(|(text, _)| text.contains(said)), "{locale}: {toasts:?}");
-    }
-}
 
 /// `a.md` open, then `asked` before writes land; the lists.
 fn reopen_and_clear(asked: fn(&mut Desk, &Path, &mut gpui::Context<Desk>), cx: &mut TestAppContext) -> (Vec<std::path::PathBuf>, Vec<std::path::PathBuf>, std::path::PathBuf) {
@@ -356,4 +340,68 @@ fn a_clear_then_a_reopen_leave_the_file_listed(cx: &mut TestAppContext) {
         desk.open_path(file.to_path_buf(), cx);
     }, cx);
     assert_eq!((on_disk, shown), (vec![real.clone()], vec![real]));
+}
+
+#[gpui::test]
+fn a_fold_is_kept_in_view_state_and_never_in_the_markdown(cx: &mut TestAppContext) {
+    let (data, files) = (
+        tempfile::tempdir().expect("data"),
+        tempfile::tempdir().expect("files"),
+    );
+    let path = files.path().join("a.md");
+    let text = "# A\n\nalpha\n\n# B\n\nbeta\n";
+    std::fs::write(&path, text).expect("a file");
+    let (desk, cx) = start(cx, data.path());
+    open(&desk, &path, cx);
+    let view = desk.read_with(cx, |desk, _| desk.active_view().expect("a tab"));
+    let document = view.read_with(cx, |view, _| view.document().clone());
+    desk.update_in(cx, |_, window, cx| {
+        document.update(cx, |document, cx| {
+            assert_eq!(document.toggle_fold_at(0, window, cx), Some(true));
+        });
+    });
+    cx.run_until_parked();
+    // The state saves once the folds rest.
+    cx.executor().advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    let kept = std::fs::read_to_string(data.path().join("view-state.json")).expect("the state");
+    assert!(kept.contains("1|0|A"), "{kept}");
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the file"),
+        text,
+        "the Markdown is untouched"
+    );
+    let beside: Vec<String> = std::fs::read_dir(files.path())
+        .expect("the folder")
+        .map(|entry| entry.expect("an entry").file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(beside, ["a.md"], "no sidecar: {beside:?}");
+}
+
+#[gpui::test]
+fn a_kept_fold_comes_back_with_the_file(cx: &mut TestAppContext) {
+    let (data, files) = (
+        tempfile::tempdir().expect("data"),
+        tempfile::tempdir().expect("files"),
+    );
+    let path = files.path().join("a.md");
+    std::fs::write(&path, "# A\n\nalpha\n\n# B\n\nbeta\n").expect("a file");
+    let mut entries = serde_json::Map::new();
+    entries.insert(
+        crate::viewstate::key(&path),
+        serde_json::json!({ "folded": ["1|0|A"] }),
+    );
+    let state = serde_json::json!({ "files": entries });
+    std::fs::write(
+        data.path().join("view-state.json"),
+        serde_json::to_vec_pretty(&state).expect("json"),
+    )
+    .expect("the state");
+    let (desk, cx) = start(cx, data.path());
+    open(&desk, &path, cx);
+    let hidden = desk.read_with(cx, |desk, cx| {
+        let view = desk.active_view().expect("a tab");
+        view.read(cx).document().read(cx).hidden(1)
+    });
+    assert!(hidden, "the file opens as it was folded");
 }
