@@ -117,7 +117,8 @@ S2 的证据（缺一项即未完成）：5 万字 K2P p50/p95/p99、>16 ms 占�
 | Ely-GPUI-Components | fc71e96 | MIT / Apache-2.0 | 保留声明 |
 | Typst / `typst-svg` / `lopdf` | 0.15.1 / 0.15.1 / 0.45 | Apache-2.0 / Apache-2.0 / MIT | 保留 LICENSE、NOTICE |
 | **思源黑体 / Noto Sans CJK（随包）** | Regular + Bold | **OFL-1.1** | 保留版权与许可全文；**不得单独售卖字体**；**改名后才能修改**（我们不改，直接用原名） |
-| 数学字体（NewCMMath 等） | 随 Typst | OFL-1.1 / Apache | 同上 |
+| 数学字体 **Noto Sans Math（随包）** | Regular | **OFL-1.1** | 同上；编辑器与导出同一份 |
+| 等宽字体 **Noto Sans Mono（随包）** | Regular | **OFL-1.1** | 同上；编辑器与导出同一份 |
 | `serde`/`serde_json`/`windows` | 1.0.229 / 1.0.154 / 0.62.2 | MIT OR Apache-2.0 | 保留声明 |
 | 其余间接依赖 | 锁 `Cargo.lock` | MIT/Apache-2.0/Zlib/BSD/ISC | `cargo-about` 生成 `THIRD-PARTY-NOTICES.txt` |
 
@@ -246,7 +247,11 @@ v0.3 把它列为风险并给了「降级为源码」的退路——**作废**�
 
 22 MB 的成因已复现（v0.3 §5.1 数据保留）：ElyMark 的 HTML 里 **0 张图片、28 个内联 SVG**；交给 MuPDF 1.28.6 转 PDF 后 **2 页 4,605,496 字节**，其中字体 4,140,464（89.9%，全部 `sub=no`）、图片 387,219（8.4%，28 张 = 28 公式，96 dpi 未压缩）。同一组 26 个公式用 Typst：1 页 56,525 字节，字体全部 `sub=yes`，0 张图片。
 
-现在字体随包，导出链不再依赖系统字体：Typst 的 `FontBook` 只装 `fonts/` 里那几份 OFL 字体，子集化由 Typst 默认完成。
+现在字体随包，导出链不再依赖系统字体：Typst 的 `FontBook` 只装 `fonts/` 里那几份 OFL 字体，子集化由 Typst 默认完成。数学也走随包字体——`#show math.equation: set text(font: ("Noto Sans Math", "Noto Sans CJK SC"))`；不设就会落回 Typst 内置的 NewCM（衬线数学，与编辑器两副面孔）。代码同理：`#show raw: set text(font: ("Noto Sans Mono", "Noto Sans CJK SC"))`。CLI 阶段用 `--ignore-system-fonts --ignore-embedded-fonts` 把字体来源钉死在 `--font-path`，库阶段由 `FontBook` 只装这批文件。
+
+`✅`/`❌` 在导出里不是原样 emoji：随包三族都没有 U+2705/U+274C，也没有 `✗`——实测只有 `✓`（U+2713，CJK 与 Math 有）和 `×`（U+00D7，三族都有）。所以 `✅` → 绿 `✓`、`❌` → 红 `×`（`#text(fill: mark-ok)[…]` / `mark-no`，颜色值在 preamble，语义在转换）。编辑器显示的是系统 emoji 字形，同色不同形——统一字形要在文档渲染里接同一套映射（接线项）。
+
+缺字形 Typst 不报警：0.15.1 的 `text.fallback` 文档原话是「目前缺字形时不会有警告，只会画豆腐块……将来才可能提供」。CLI 与库都没有这条诊断，`--ignore-embedded-fonts` 把它变成可见的豆腐块（不借外来字体），S6 手工清单负责抽查。
 
 审计（`lopdf`）：页数、总字节、逐字体字节（`FontFile2/3`、`/Length1`）、图片（`/Filter`、按哈希去重）、内容流压缩、每页最大图片覆盖率。导出后固定一行：
 
@@ -255,7 +260,7 @@ export pdf: pages=12 bytes=845120 fonts=[{"name":"SourceHanSansSC","bytes":41200
 ```
 
 阈值：单页均值 > 500 KB、单字体 > 3 MB、图片占比 > 70%、任一图片覆盖页面积 > 40% → 日志 + 状态栏。
-验收：用户 `作业.md` **≤ 2 MB**、导出 ≤ 10 s、`compressed=true`、`max_image_coverage ≈ 0`、`pdffonts` 全 `sub=yes`。
+验收：用户 `作业.md` **≤ 2 MB**、导出 ≤ 10 s、`compressed=true`、`max_image_coverage ≈ 0`、`pdffonts` 全 `sub=yes`，且 `pdffonts` 里每个字体都来自 `assets/fonts/`（出现别的字体即字体漂移，比体积超限更严重）。
 
 ## 8. 界面（按 ima 骨架，去掉 AI）
 
@@ -298,8 +303,8 @@ export pdf: pages=12 bytes=845120 fonts=[{"name":"SourceHanSansSC","bytes":41200
 - **S2 Markdown、折叠与公式**：逐段渲染、编辑闭环；折叠 + 大纲（§5）；行内 + 块级公式（§6）。**退出**：5 万字 K2P p95 ≤ 16 ms、掉帧 < 1%；折叠 ≤ 16 ms 且 shape 为 0；用户 `作业.md` 的 26 个公式全对、中文混排行内公式正确；单段用例有书面结论。
 - **S3 文件与安全**：外部改动、单实例转发（新建 tab）、原子保存 + 占用重试、自动保存/崩溃恢复、撤销、关闭脏 tab 拦截、会话恢复。**退出**：杀进程不丢稿；外部改文件不静默覆盖；占用保存有明确错误；退出重开 tab 顺序/光标/折叠复原。
 - **S4 插件**：supervisor、契约、清单、启停。**退出**：Python CSV 插件工作；超时降级；坏清单不影响启动；加格式零改动。
-- **S5 导出**：Block→`.typ`、Typst 调用、`pdf_audit`、阈值。**退出**：`作业.md` ≤ 2 MB；审计齐全；`pdffonts` 全 `sub=yes`。
-- **S6 打包与硬化**：zip 免安装、便携数据目录、VCRT 验证、日志、许可页（含 OFL 全文）、10 份真实文档。**退出**：干净 Win11 解压可用；许可文件齐全。
+- **S5 导出**：Block→`.typ`、Typst 调用、`pdf_audit`、阈值。**退出**：`作业.md` ≤ 2 MB；审计齐全；`pdffonts` 全 `sub=yes` 且字体全部来自 `assets/fonts/`。
+- **S6 打包与硬化**：zip 免安装、便携数据目录、VCRT 验证、日志、许可页（含 OFL 全文）、10 份真实文档。**退出**：干净 Win11 解压可用；许可文件齐全；导出抽查无豆腐块（Typst 0.15 不报缺字形，只能人看：随机挑 emoji、希腊字母、箭头各几条）。
 
 **什么时候算完**（六条全过即发 1.0，之后只修 bug，新需求进 `later.md`）：
 ① S1–S6 退出条件全过；② 10 份真实文档（含用户这份）打开/编辑/保存无错；③ 导出 ≤ 2 MB、审计无告警、公式矢量；④ 5 万字 K2P p95 ≤ 16 ms、掉帧 < 1%，折叠 ≤ 16 ms，单段用例有书面结论；⑤ 干净机器解压即用、无 VCRT 依赖、字体不缺；⑥ 许可文件齐全（GPL + OFL + THIRD-PARTY）、源码公开可拉。

@@ -86,9 +86,13 @@ fn text(cx: &mut App) {
     }
     Theme::update(cx, |theme| {
         theme.font_family = family.clone();
+        theme.mono_family = crate::fonts::MONO.into();
         theme.font_scale = size as f32 / UI_TEXT_SIZES.2 as f32;
     });
-    log::info!("theme: interface text {family} at {size} px");
+    log::info!(
+        "theme: interface text {family} at {size} px; code in {}",
+        crate::fonts::MONO
+    );
 }
 
 fn motion(cx: &mut App) {
