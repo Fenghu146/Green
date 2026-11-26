@@ -2377,7 +2377,9 @@ Used by:
   - ely-platform 0.1.17
   - ely-start 0.1.17
   - ely-ui 0.1.17
+  - green-export 0.1.17
   - green-math 0.1.17
+  - green-plugins 0.1.17
 --------------------------------------------------------------------------------
 GNU GENERAL PUBLIC LICENSE
 Version 3, 29 June 2007
