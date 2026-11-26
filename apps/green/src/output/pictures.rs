@@ -189,7 +189,7 @@ fn file_path(rest: &str) -> PathBuf {
 }
 
 /// `%XX` undone; bytes that are not UTF-8 stay as written.
-fn decoded(url: &str) -> String {
+pub(super) fn decoded(url: &str) -> String {
     let bytes = url.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;

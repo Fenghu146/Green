@@ -3,6 +3,7 @@
 mod address;
 mod files;
 mod html;
+mod pdf;
 mod pictures;
 mod plain;
 #[cfg(test)]
