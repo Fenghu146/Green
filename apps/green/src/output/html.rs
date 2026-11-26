@@ -470,7 +470,9 @@ fn tag(style: Style) -> &'static str {
         Style::Code => "code",
         Style::Underline => "u",
         Style::Mark => "mark",
-        Style::Link | Style::Math | Style::Footnote => unreachable!("{style:?} writes no tag"),
+        Style::Link | Style::Math | Style::Footnote | Style::Pass | Style::Fail => {
+            unreachable!("{style:?} writes no tag")
+        }
     }
 }
 

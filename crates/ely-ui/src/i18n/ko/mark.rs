@@ -3,6 +3,7 @@
 pub(super) const KO: &[(&str, &str)] = &[
     ("mark.pane.files", "파일"),
     ("mark.math.unsupported", "\\{name}({at}번째 바이트)은 수식 허용 목록에 없습니다"),
+    ("mark.math.failed", "{count}개의 수식을 조판하지 못했습니다. 각각 TeX로 표시됩니다"),
     ("mark.alert.note", "참고"),
     ("mark.alert.tip", "팁"),
     ("mark.alert.important", "중요"),

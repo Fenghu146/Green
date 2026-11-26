@@ -9,6 +9,7 @@ fn export_asks_for_a_format_then_writes_it(cx: &mut TestAppContext) {
         tempfile::tempdir().expect("data"),
         tempfile::tempdir().expect("files"),
     );
+    crate::output::tests::start_math_once();
     let path = files.path().join("note.md");
     std::fs::write(&path, "# Note\n\nText $x$.\n").expect("a file");
     let (desk, cx) = start(cx, data.path());

@@ -9,7 +9,23 @@ pub(super) static ALERTS: std::sync::LazyLock<[String; 5]> = std::sync::LazyLock
     ["Note", "Tip", "Important", "Warning", "Caution"].map(str::to_string)
 });
 
+/// HTML export asks Typst for a formula's SVG; the engine needs the bundled
+/// faces, which only the app's startup normally installs.
+pub(crate) fn start_math_once() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let faces = ely_ui::fonts::bytes()
+            .expect("the bundled fonts")
+            .into_iter()
+            .filter_map(|bytes| typst::text::Font::new(typst::foundations::Bytes::new(bytes), 0))
+            .collect();
+        ely_gpui_component::documents::start_math(faces).expect("the formula engine starts");
+    });
+}
+
 fn page(text: &str, beside: Option<&Path>, pictures: &Pictures) -> super::Page {
+    start_math_once();
     body(text, beside, pictures).expect("a page")
 }
 
@@ -378,19 +394,17 @@ fn a_failed_linked_page_takes_the_folder_it_made() {
 }
 
 #[test]
-fn a_formula_letter_no_font_has_stays_as_tex() {
+fn a_formula_letter_no_font_has_still_draws() {
+    // Typst does not warn on a missing glyph (design §7): it draws tofu.
+    // RaTeX used to refuse here; with the shared engine the SVG is produced
+    // and the glyph audit, not a compile failure, is what catches it.
     let page = page(
         "Before\n\n$\\text{\u{F0000}}$ after.\n",
         None,
         &Pictures::Inline,
     );
-    let lines: Vec<usize> = page.formulas.iter().map(|(line, _)| *line).collect();
-    assert_eq!(lines, [3]);
-    assert!(
-        page.html.contains("<code>\\text{\u{F0000}}</code>"),
-        "{}",
-        page.html
-    );
+    assert!(page.formulas.is_empty(), "{:?}", page.formulas);
+    assert!(page.html.contains("<svg"), "{}", page.html);
 }
 
 #[test]

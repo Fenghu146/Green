@@ -5,13 +5,20 @@ use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
 use crate::audit::{self, Audit, Font, Warning};
 use crate::doc::{Align, Block, Inline, Item, Style};
-use crate::typst::{self, PREAMBLE};
+use crate::typst;
 
 fn body(blocks: &[Block]) -> String {
     let (out, _) = typst::source(blocks).expect("the source");
-    out.strip_prefix(PREAMBLE)
+    out.strip_prefix(&typst::preamble())
         .expect("the preamble first")
         .to_string()
+}
+
+#[test]
+fn the_export_defines_gbox_from_the_shared_rule() {
+    // The converter emits `#gbox[…]`; a PDF with `\boxed` must compile, and
+    // the frame's style must stay the one the editor's preamble gets.
+    assert!(typst::preamble().contains(&green_math::gbox_rule(typst::GBOX_STROKE)));
 }
 
 fn paragraph(text: &str) -> Block {

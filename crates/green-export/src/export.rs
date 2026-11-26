@@ -9,6 +9,7 @@ use crate::audit::{self, Audit, Warning};
 use crate::compile::Compiler;
 use crate::doc::Block;
 use crate::glyphs::{self, Missing};
+use crate::preflight::Preflight;
 use crate::typst;
 
 /// A finished export.
@@ -50,7 +51,10 @@ pub fn export(
 ) -> Result<Export> {
     let started = Instant::now();
     let missing = glyphs::missing(blocks, fonts)?;
-    let (source, formulas) = typst::source(blocks)?;
+    // One refused formula must not take the document down: compile every one
+    // first, keep the failures as literal TeX, then compile the whole PDF.
+    let preflight = Preflight::new(fonts)?;
+    let (source, formulas) = typst::source_checked(blocks, Some(&|_, markup| preflight.check(markup)))?;
     compiler.compile(&source, pdf)?;
     let audit = audit::read(pdf)?;
     let mut warnings = audit.warnings();

@@ -90,6 +90,36 @@ fn the_assignment_note_stays_under_two_megabytes() {
     }
 }
 
+/// A formula Typst rejects is kept as literal TeX; the rest still exports.
+#[test]
+fn a_formula_typst_refuses_is_kept_and_the_rest_still_exports() {
+    let Some(exe) = typst() else {
+        eprintln!("GREEN_TYPST is unset; the compile-failure fallback did not run");
+        return;
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("the repository root");
+    let fonts = root.join("assets/fonts");
+    // This converts fine but Typst rejects the bare `]`: an unclosed
+    // delimiter. Before the preflight it took the whole PDF down (§7.8).
+    let blocks = vec![
+        Block::Math(r"x\in(-1,1]".into()),
+        Block::Paragraph(Inline::plain("其余正文照常")),
+        Block::Math(r"\frac{1}{2}".into()),
+    ];
+    let out = std::env::temp_dir().join(format!("green-export-fallback-{}.pdf", std::process::id()));
+    let export = export(&blocks, &out, &Cli::new(exe, &fonts, &root), &fonts).expect("the export");
+    let _ = std::fs::remove_file(&out);
+
+    assert_eq!(export.formulas.len(), 1, "{:?}", export.formulas);
+    // Literal TeX in a paragraph is escaped so Typst cannot read it as math.
+    assert!(export.source.contains("\\$x\\\\in"), "{}", export.source);
+    assert!(export.source.contains("frac(1, 2)"), "{}", export.source);
+    assert!(export.audit.pages >= 1);
+}
+
 /// The counterexample: a character none of the four faces has is named with
 /// where it is, and the rest of the document still exports.
 #[test]

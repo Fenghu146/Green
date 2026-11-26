@@ -544,6 +544,17 @@ impl Desk {
             None => bar,
         };
         let caret = self.caret_said(cx).expect("a tab");
+        // A formula that would not draw left its TeX among the words.
+        let bar = match ely_gpui_component::documents::math_failure() {
+            Some(_) => {
+                let failed = ely_gpui_component::documents::math_counts().failed.to_string();
+                bar.left(
+                    StatusBarItem::new("mark-math-failed")
+                        .label(text(cx, "mark.math.failed", &[("count", &failed)])),
+                )
+            }
+            None => bar,
+        };
         let bar = match self.count_item(cx) {
             Some(count) => bar.right(count),
             None => bar,

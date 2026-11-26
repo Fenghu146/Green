@@ -1,6 +1,6 @@
 use gpui::{Context, IntoElement, Render, TestAppContext, Window, div, prelude::*, px, rems};
 
-use super::{HEAVY, MarkdownRenderer, Style, highlight};
+use super::{HEAVY, MarkdownRenderer, Style, heading_step, highlight};
 use crate::theme::{ActiveTheme, TextSize, Theme};
 
 /// `source` drawn in a 400-point column.
@@ -128,9 +128,10 @@ fn a_zoomed_document_scales_its_headings(cx: &mut TestAppContext) {
     let (document, cx) = cx.add_window_view(|window, cx| {
         MarkdownDocument::new("### a\n", MarkdownMode::Preview, window, cx)
     });
+    let zoom = 1.5;
     document.update(cx, |document, cx| {
         let look = DocumentLook {
-            scale: 1.5,
+            scale: zoom,
             ..DocumentLook::default()
         };
         document.set_look(look, cx);
@@ -148,7 +149,9 @@ fn a_zoomed_document_scales_its_headings(cx: &mut TestAppContext) {
         .expect("drawn")
         .size
         .height;
-    let off = high - pad - base * 1.5 * 1.5 * 1.3;
+    // H3 is 1.15× since S2a (design §8), not the old 1.5×; the row's
+    // 1.3 line-height and the 0.5rem top pad are unchanged.
+    let off = high - pad - base * zoom * heading_step(3) * 1.3;
     assert!(off.abs() < px(0.5), "{high:?}");
 }
 

@@ -6,6 +6,7 @@ pub mod compile;
 pub mod doc;
 pub mod export;
 pub mod glyphs;
+pub mod preflight;
 pub mod typst;
 
 pub use audit::{Audit, Font, Warning};

@@ -2278,6 +2278,7 @@ dependencies = [
  "emojis",
  "entities",
  "gpui-pre",
+ "green-math",
  "html5ever",
  "image",
  "jiff",
@@ -2289,8 +2290,13 @@ dependencies = [
  "ratex-svg",
  "ratex-types",
  "regex",
+ "resvg",
  "similar",
  "smallvec",
+ "tiny-skia",
+ "typst",
+ "typst-layout",
+ "typst-svg",
  "unicode-segmentation",
  "unicode-width",
  "usvg 0.46.0",
@@ -4013,6 +4019,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "typst",
  "unicode-segmentation",
 ]
 
@@ -4026,6 +4033,8 @@ dependencies = [
  "lopdf",
  "sha2 0.10.9",
  "ttf-parser",
+ "typst",
+ "typst-layout",
 ]
 
 [[package]]

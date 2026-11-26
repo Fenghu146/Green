@@ -416,6 +416,30 @@ mod tests {
     }
 
     #[gpui::test]
+    fn a_plugin_timeout_names_its_ms_and_the_manifest_key(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            for (tag, want) in [
+                (
+                    "en-US",
+                    "a.slow did not open: the plugin timed out after 200 ms. Raise timeoutMs in its manifest.",
+                ),
+                (
+                    "zh-CN",
+                    "a.slow 未能打开：插件超时（200 ms）。可在清单里调大 timeoutMs。",
+                ),
+            ] {
+                super::install_as(tag, cx);
+                let said = super::text(
+                    cx,
+                    "office.error.plugin_timeout",
+                    &[("name", "a.slow"), ("ms", "200")],
+                );
+                assert_eq!(said.to_string(), want, "{tag}");
+            }
+        });
+    }
+
+    #[gpui::test]
     fn counted_reads_one_and_many_in_both_languages(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
             super::install_as("en-US", cx);

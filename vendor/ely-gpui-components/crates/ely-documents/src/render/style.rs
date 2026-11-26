@@ -55,5 +55,14 @@ pub(super) fn highlight(style: &Style, colors: &Palette, rule: Pixels) -> Highli
             background_color: Some(colors.warning_subtle),
             ..HighlightStyle::default()
         },
+        // The export's own marks: brand deep green passes, red fails.
+        Style::Pass => HighlightStyle {
+            color: Some(gpui::rgb(0x2e7d46).into()),
+            ..HighlightStyle::default()
+        },
+        Style::Fail => HighlightStyle {
+            color: Some(gpui::rgb(0xb42318).into()),
+            ..HighlightStyle::default()
+        },
     }
 }

@@ -117,6 +117,46 @@ fn shortcodes_draw_as_emoji_outside_code() {
 }
 
 #[test]
+fn entities_decode_before_structure_and_never_become_markup() {
+    // The notes are generated: their prose carries numeric entities.
+    let text = line("两个地址字段，&#x548C;一个操作数，&#x4E4B;&#x662F;。");
+    assert_eq!(text.text, "两个地址字段，和一个操作数，之是。");
+    // `&amp;amp;` is one entity, decoded once: it reads as `&amp;`, not `&`.
+    let once = line("a &amp;amp; b &amp; c &lt; d &nbsp; e");
+    assert_eq!(once.text, "a &amp; b & c < d \u{a0} e");
+    // Decoded characters are text, not syntax: no heading, no table cell.
+    assert_eq!(line("&num; 不是标题").text, "# 不是标题");
+    assert_eq!(line("a &vert; b").text, "a | b");
+    // A tag written as entities stays text, character for character.
+    assert_eq!(
+        line("&lt;script&gt;alert(1)&lt;/script&gt;").text,
+        "<script>alert(1)</script>"
+    );
+    // A code span and a formula keep their source: entities are literal there.
+    let verbatim = line("`&amp;` and $&amp;$");
+    assert_eq!(verbatim.text, "&amp; and &amp;");
+    assert_eq!(
+        verbatim.styles,
+        [(0..5, Style::Code), (10..15, Style::Math)]
+    );
+}
+
+#[test]
+fn a_zero_width_space_does_not_cut_the_formula() {
+    // The notes glue display formulas to Chinese with U+200B on both sides.
+    let text = line("\u{200b}$x_n$\u{200b}");
+    assert_eq!(text.text, "\u{200b}x_n\u{200b}");
+    assert_eq!(text.styles, [(3..6, Style::Math)]);
+}
+
+#[test]
+fn a_bold_line_keeps_its_quotes() {
+    let text = line(r#"**浅紫色**高亮了那些"横跨边界"的数据"#);
+    assert_eq!(text.text, r#"浅紫色高亮了那些"横跨边界"的数据"#);
+    assert_eq!(text.styles, [(0..9, Style::Strong)]);
+}
+
+#[test]
 fn footnotes_number_by_their_first_reference() {
     let nodes = parse("x[^b] y[^a] z[^b]\n\n[^a]: A\n\n[^b]: B\n");
     let Node::Paragraph(text) = &nodes[0] else {
@@ -472,4 +512,15 @@ fn a_lone_pair_stays_text() {
     let text = line("a == b");
     assert_eq!(text.text, "a == b");
     assert!(text.styles.is_empty());
+}
+#[test]
+fn a_mark_keeps_the_formula_after_it_whole() {
+    // The bytes after ✅/❌ must keep their offsets: a shifted span used to
+    // slice `\boxed{…}` into `oxed{…}` and draw the wrong formula.
+    let pass = line("✅ $x_n$");
+    assert_eq!(pass.text, "✓ x_n");
+    assert_eq!(pass.styles, [(0..3, Style::Pass), (4..7, Style::Math)]);
+    let fail = line("❌ $x_n$");
+    assert_eq!(fail.text, "× x_n");
+    assert_eq!(fail.styles, [(0..2, Style::Fail), (3..6, Style::Math)]);
 }

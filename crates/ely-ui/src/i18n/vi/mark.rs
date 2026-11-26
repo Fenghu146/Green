@@ -3,6 +3,7 @@
 pub(super) const VI: &[(&str, &str)] = &[
     ("mark.pane.files", "Tệp tin"),
     ("mark.math.unsupported", "\\{name} tại byte {at} không có trong danh sách công thức"),
+    ("mark.math.failed", "{count} công thức không dàn được; mỗi công thức hiện TeX của nó"),
     ("mark.alert.note", "Ghi chú"),
     ("mark.alert.tip", "Mẹo"),
     ("mark.alert.important", "Quan trọng"),

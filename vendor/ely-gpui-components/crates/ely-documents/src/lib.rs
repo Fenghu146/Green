@@ -45,7 +45,6 @@ pub use blocks::{Align, BlockData, BlockEditor, BlockEvent, BlockKind, Media};
 pub use contents::outline;
 pub use counts::{ReadingTime, WordCount};
 pub use diagram::{Diagram, diagram_svg};
-pub(crate) use diagram::{flatten, options as svg_options};
 pub use document::{
     Attachment, BlockCommand, DocumentEvent, DocumentHeading, DocumentLook, DocumentTarget,
     EditRefusal, InlineFormat, LARGEST_READ, MarkdownDocument, OutlineHeading, TableEdit,
@@ -60,14 +59,20 @@ pub use link::LinkEditor;
 pub use markdown::file_tree as markdown_tree;
 pub use markdown::markdown_highlights;
 pub use markdown::mdast::{self, AlignKind};
-pub use math::{Latex, MathError, formula_svg};
-pub(crate) use math::{failed, typeset};
+pub use math::{
+    Latex, MathCounts, MathError, counts as math_counts, formula_svg,
+    last_failure as math_failure, start as start_math,
+};
+pub(crate) use math::{failed, literal, typeset};
+
+/// The `#gbox` and maths rules the editor's preamble and the export's share.
+pub use green_math::{gbox_rule, math_rule};
 pub use modes::{MarkdownEditor, MarkdownMode};
 pub use pages::{PageCover, PageIcon};
 pub use picture::{HeldPicture, Pictures};
 pub use print::{Margins, Paper, PrintPreview, PrintSettings, sheet};
 pub use reading::{Footnote, Glossary, ReadingProgress, TooltipTerm, ZenMode};
-pub use render::{AlertTitles, MarkdownRenderer, RightPress};
+pub use render::{AlertTitles, MarkdownRenderer, RightPress, inline_math};
 pub use rich::RichTextEditor;
 pub use templates::{Template, TemplatePicker};
 pub use thumbs::PageThumbnailList;

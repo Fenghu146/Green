@@ -168,9 +168,9 @@ impl BlockEditor {
                         .py_2()
                         .child(math)
                         .into_any_element(),
-                    Err(error) => div()
-                        .text_color(colors.danger)
-                        .child(error.to_string())
+                    Err(_error) => div()
+                        .text_color(colors.fg_muted)
+                        .child(crate::math::literal(&tex))
                         .into_any_element(),
                 };
                 div()

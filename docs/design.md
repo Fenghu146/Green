@@ -137,11 +137,11 @@ OFL 不在原白名单（MIT/Apache/BSD/ISC/Zlib/Unicode/CC0）里，是用户�
 ```
 %APPDATA%\Green\plugins\<id>\  manifest.json + 任意脚本
 { "id": "csv", "version": "0.1.0", "apiVersion": 1, "extensions": [".csv"],
-  "command": ["python", "csv_plugin.py"], "timeoutMs": 3000, "enabled": true }
+  "command": ["python", "csv_plugin.py"], "timeoutMs": 8000, "enabled": true }
 ```
 
 stdin 收 `{apiVersion, path, ext, content(base64), contentOmitted, capabilities}`，stdout 回 `{apiVersion, blocks[], meta}`。`content` 上限 8 MB；超过时 `content` 为 `null`、`contentOmitted` 为 `true`，插件按 `path` 自读。失败/超时/坏清单 → 降级 plaintext + 状态栏，不影响启动。
-兼容：`apiVersion` 整数、超范围拒绝；`capabilities` 协商（清单省略 = `["blocks@1"]`）；两侧忽略未知字段、新增字段可选有默认值；破坏性变更 `apiVersion += 1`，旧版留 2 个小版本；`timeoutMs` 50–30000、默认 3000，覆盖进程启动到退出。
+兼容：`apiVersion` 整数、超范围拒绝；`capabilities` 协商（清单省略 = `["blocks@1"]`）；两侧忽略未知字段、新增字段可选有默认值；破坏性变更 `apiVersion += 1`，旧版留 2 个小版本；`timeoutMs` 50–30000、默认 8000，覆盖进程启动到退出；首次与后续打开同值，超时提示单独说明毫秒数与 `timeoutMs` 可调。
 缓存：按 (path, mtime, size, 插件 version, `command` 指到的文件指纹) 缓存；打开文件时比对指纹，脚本或清单变了就重读清单并清掉该插件的缓存（热更新，不重启 Green）。
 
 **v1 Block 契约**（外部作者唯一接触的接口；core 的 Block 模型向它对齐，不改契约）：
@@ -255,6 +255,10 @@ v0.3 把它列为风险并给了「降级为源码」的退路——**作废**�
 1. 显示继续用基座的 RaTeX，导出用 Typst → 明确写「两副面孔」，并在设置里给出「公式外观以导出为准」的说明；
 2. 公式区域改为自绘 canvas（自己管行内排版）→ 成本翻倍，需重新评估 S2；
 3. **不接受**「降级为 `$...$` 源码」——那等于砍掉用户的主要用法。
+
+### 6.5 S2b 落地（2026-11-26）
+
+渲染器已换成 Typst 进程内（`ely-documents::math`）：`green-math` 转 LaTeX→Typst，`typst::compile` 一个单公式文档，`page.frame` 向下钻单层 Group 取真 baseline，`typst-svg` 出矢量路径，`usvg`(dpi 72) + `resvg` 按**设备缩放 × 2** 出位图；缓存键是（公式源、行内/块级、文字色、框线色、字号、窗口缩放），LRU 上限 256 条。行内仍是基座的 NBSP 胶水 + 图片覆盖，公式的基线对齐到该行文字基线，超出行高的部分按 ascent/descent 抬高 `line_height`。`\boxed` 只吐 `#gbox[$…$]`，`#gbox` 的线宽/内距/圆角/颜色由 `green_math::gbox_rule` 定义，编辑器的 preamble 用它；导出侧**尚未**把这一行并进自己的 PREAMBLE（`crates/green-export` 只读）。单条公式转换或编译失败降级为该条 `$…$` 源码、计数进状态栏并 `log::warn`，其余照常。
 
 ## 7. 导出（Typst，已定）
 

@@ -67,6 +67,10 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("office.error.engine", "{error}"),
     ("office.error.format", "Save As writes .{formats}"),
     ("office.error.open", "{name} did not open: {error}"),
+    (
+        "office.error.plugin_timeout",
+        "{name} did not open: the plugin timed out after {ms} ms. Raise timeoutMs in its manifest.",
+    ),
     ("office.error.not_package", "it is not a real .{ext} file; its content is another format, such as plain text"),
     ("office.error.damaged", "the file is damaged; get a fresh copy from its sender, or save it again in the program that made it"),
     ("office.error.password_unkept", "this password has words Ely cannot save with (such as \",Password=\"); change the password in the program that set it, then open the file again"),
@@ -209,6 +213,10 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("office.error.engine", "{error}"),
     ("office.error.format", "另存为只写 .{formats}"),
     ("office.error.open", "{name} 未能打开：{error}"),
+    (
+        "office.error.plugin_timeout",
+        "{name} 未能打开：插件超时（{ms} ms）。可在清单里调大 timeoutMs。",
+    ),
     ("office.error.not_package", "它不是真正的 .{ext} 文件，内容是别的格式（例如纯文本）"),
     ("office.error.damaged", "文件已损坏；请向发送方重新获取，或用生成它的程序另存一份"),
     ("office.error.password_unkept", "这个密码含 Ely 保存时无法带上的字样（如“,Password=”）；请在设置密码的程序里改用别的密码，再打开"),

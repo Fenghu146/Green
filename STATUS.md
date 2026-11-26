@@ -23,6 +23,19 @@
 
 - run `45808353158`（head `ffe922d`）的 `test` job 红**不是 `skips.sh` 假红**：第 6 步 `cargo test --workspace` 退出 101，`-p green-plugins --test process` 的 `the_shipped_log_plugin_speaks_the_same_contract_from_node` 在 `crates/green-plugins/tests/process.rs:154` 对 `Option<&[Block]>` 的 `.expect("blocks")` panic（该二进制 14 passed / 1 failed）；第 7 步 `scripts/skips.sh` 是 success，日志里没有 `SKIP:` 或 `GREEN_TYPST`。真因是插件测试失败，由另一条线修。
 - 历史记录：2026-11-26 的 main 上 `test-app` job（`cargo test -p green`）因两处测试代码错误红——`apps/green/src/output/tests.rs` 调用了不是 green dev-dependency 的 `ely_pdf_engine`，`apps/green/src/desk/tests.rs` 调用了不存在的 `Desk::tree_failed`；当时 S2 工作树已有修复。该 job 故意保持启用，关掉它只会让同类破坏无人发现。这只记当时的原因，当前状态以 CI 结果为准。
+## S2b 修复落地状态
+
+- 裸标识符 `nf / ne / n2` 不再被当成 Typst 的单个未知变量：`green-math`
+  把「任何裸 ASCII 字母数字串逐字符拆」写成契约并加真编译测试，提交 `fd87c3d`。
+  旧 main 的转换器才会在真实笔记里报 `unknown variable nf / ne / n2`。
+- 一条公式编译失败不再连坐整篇 PDF：`crates/green-export` 先进程内真编译
+  每条公式，转换或编译失败都降级为字面 TeX，再编译整篇，提交 `3258d54`。
+- U+200B 在写进 Typst 前从正文和公式源码两处剥掉（同一提交），PDF 文本层
+  不再残留不可见字符。
+- 真实笔记 6.2 / 6.4 / 6.5 现在能导出：降级 6 / 9 / 8 条公式，分别 13 / 14 / 8 页、
+  415 / 474 / 311 KB，其余公式正常排版。**降级不是通过**：这三份仍不进 CI 正样本，
+  等真实笔记那条线复验后再决定夹具。
+
 ## 已知债
 
 ### 真实笔记夹具：能过才进 CI，其余进已知债
@@ -52,6 +65,20 @@
 - `a_wrong_token_hands_nothing_over`：原先在 `src/instance/door/tests.rs:80` 只接受 `PermissionDenied`，CI 实得 `TimedOut`。负载下哪种错误先到没有确定答案；现在接受两者，但仍断言 `hand()` 没有成功、且 `heard.try_recv()` 没有文件到达。**它仍是权限测试**（坏 token 拿不到文件），只是不再钉死具体错误码。
 - `a_dripping_caller_neither_blocks_nor_stays`：原先断言 `held < PATIENCE + 2s`（7s），CI 实测 10.66s；现在改成 `held < PATIENCE * 2 + 2s`（12s）。45 × 300ms 的 drip 全程 13.5s，12s 仍短于未切断路径，且 `hand()` 成功本身已证明 drip 被切断。这是测试判据放宽，绝对时间上界更松，代价记在此处。
 - CI 时长：夹具放在 `test` job 里时整次 16 分 34 秒（test job 16 分 33 秒），超过 15 分钟线。已移到独立 `real-fixtures` job（上限 3 分钟），复用 build job 上传的 `green.exe` 与 test job 安装并上传的 Typst，test job 不再二次构建。
+### 组件库快照反向依赖 `green-math`
+
+`patches/ely-gpui-components/fc71e96-0004` 给 `ely-documents` 加了
+`green-math` 依赖（带 version，才能过 cargo-deny 的 wildcard 检查）。这等于让
+「上游快照 + 补丁」反过来牵住我们自己的 crate：从 pin 重建 vendor 时，仓库路径必须存在。
+长期方向是**依赖倒置**：组件库不改，由调用方（app）把转换好的 Typst 源码传进去，
+vendor 于是只跟着 pin 走。本轮为赶 S2b 不做倒置，但改 vendor 或重建脚本前先看这条。
+
+### S2b 阶段二：大纲标题里的公式还没接回
+
+合并 `origin/main` 时大纲采用了 main 的折叠树（`Outline::item` + `on_fold`），
+分支里旧的「标题里的行内公式画成图」接线（`Outline::drawn`）随之替换。现在含公式的标题显示源码；
+转换器和 Typst 进程内渲染器都还在，第二阶段在 main 的树上重新接 `documents::inline_math` 即可。
+块级 `$$…$$` 渲染不依赖这一项，已完成。
 
 ### 还叫 ely-mark / ElyMark 的地方
 
@@ -72,3 +99,17 @@
 
 **要改就一次改完**：先定更新资产名（发布契约），再统一 action 名、CLI 文案、i18n 与注释。
 数据目录已是 `Green/green`，不需要迁移；单独改一半会让测试里的字符串断言与发布脚本各说各话。
+
+### Node 插件测试的冷启动边界
+
+`crates/green-plugins/tests/process.rs` 的 Node 用例在 CI 上偶发 `blocks = None`：run 45808353158 失败；
+同样的代码在 run 45800810110 通过，但用时 3.59 s，失败那次用时 7.47 s。该测试的清单当时没写
+`timeoutMs`，走默认 3000 ms；超时后 supervisor 还要各等 2 s 关 stdout / stderr 管道。把 PATH 上的
+`node` 换成延迟 2.95 s 的壳后，旧默认 3000 ms 下 10/10 失败，8000 ms 默认下 10/10 通过。
+本机 Node v24.22.1 和 v22.23.2 无延迟时，两种超时各跑 30 次都是 0/30 失败。
+据此这是阈值附近的 runner 差异，不是 JSON 契约、路径编码、CRLF / BOM、8 MB 截断或测试间并发。
+产品默认值现在是 8000（上限仍 30000），首次与后续打开同值；测试清单不再写 `timeoutMs`，直接走默认，
+`examples/plugins/log/manifest.json` 也从 3000 升到 8000。
+超时降级时状态栏用 `office.error.plugin_timeout` 单独说“插件超时（N ms）……timeoutMs”，
+契约错误仍走 `office.error.open`；测试断言打印 `View` 的 reason，`Timeout(...)` 与 `Exit` / `InvalidJson`
+一眼可分。以后再红先看 reason 与耗时，不要改插件输出。

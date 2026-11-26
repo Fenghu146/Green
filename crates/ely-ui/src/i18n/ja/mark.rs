@@ -3,6 +3,7 @@
 pub(super) const JA: &[(&str, &str)] = &[
     ("mark.pane.files", "ファイル"),
     ("mark.math.unsupported", "\\{name}（{at} バイト目）は数式の許可リストにありません"),
+    ("mark.math.failed", "{count} 件の数式を組めませんでした。それぞれ TeX のまま表示します"),
     ("mark.alert.note", "注記"),
     ("mark.alert.tip", "ヒント"),
     ("mark.alert.important", "重要"),

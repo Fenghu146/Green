@@ -3,6 +3,7 @@
 pub(super) const ES: &[(&str, &str)] = &[
     ("mark.pane.files", "Archivos"),
     ("mark.math.unsupported", "\\{name} en el byte {at} no está en la lista de fórmulas permitidas"),
+    ("mark.math.failed", "{count} fórmula(s) no se compusieron; cada una muestra su TeX"),
     ("mark.alert.note", "Nota"),
     ("mark.alert.tip", "Consejo"),
     ("mark.alert.important", "Importante"),
