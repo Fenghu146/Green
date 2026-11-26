@@ -50,13 +50,13 @@ fn a_save_leaves_newer_edits_their_due() {
     engine.edit(t0 + Duration::from_millis(1200));
     engine.save_finished(1, true);
     assert_eq!(
-        engine.tick(t0 + Duration::from_millis(2100)),
+        engine.tick(t0 + Duration::from_millis(1900)),
         Action::Nothing
     );
     assert_eq!(
-        engine.tick(t0 + Duration::from_millis(2300)),
+        engine.tick(t0 + Duration::from_millis(2100)),
         Action::SaveDue(2),
-        "the newer edit gets its own second"
+        "the newer edit gets its own 800 ms"
     );
     engine.save_finished(2, true);
     assert_eq!(engine.tick(at(t0, 4)), Action::Nothing);
@@ -118,11 +118,11 @@ fn pathless_edits_during_the_first_save_get_scheduled() {
     engine.save_finished(1, true);
     engine.set_has_path();
     assert_eq!(
-        engine.tick(t0 + Duration::from_millis(1400)),
+        engine.tick(t0 + Duration::from_millis(1200)),
         Action::Nothing
     );
     assert_eq!(
-        engine.tick(t0 + Duration::from_millis(1600)),
+        engine.tick(t0 + Duration::from_millis(1400)),
         Action::SaveDue(2)
     );
 }

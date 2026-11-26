@@ -160,6 +160,7 @@ impl Desk {
             .and_then(|path| path.parent())
             .map(PathBuf::from);
         let (revision, work) = (source.session.revision(), source.work.clone());
+        let alerts = output::alerts(cx);
         let opened = path.clone();
         cx.spawn(async move |desk, cx| {
             let written = cx
@@ -170,6 +171,7 @@ impl Desk {
                         session: session.as_deref(),
                         revision,
                         work: &work,
+                        alerts: &alerts,
                     };
                     output::write(format, &markdown, beside.as_deref(), &target)
                 })
@@ -226,6 +228,15 @@ impl Desk {
             );
             self.toast_unlogged(said, Severity::Warning, cx);
         }
+        // A PDF keeps what the converter refused as its TeX (§7.8).
+        if !page.formulas_kept.is_empty() {
+            let said = text(
+                cx,
+                "mark.export.formulas",
+                &[("list", &page.formulas_kept.join("; "))],
+            );
+            self.toast_unlogged(said, Severity::Warning, cx);
+        }
     }
 
     /// Logs `error` itself; only the toast reads its words.
@@ -252,6 +263,7 @@ impl Desk {
             .and_then(|path| path.parent())
             .map(PathBuf::from);
         let (revision, work) = (source.session.revision(), source.work.clone());
+        let alerts = output::alerts(cx);
         let pdf = print_copy(&work);
         log::info!("mark: prints tab {tab}");
         cx.spawn(async move |desk, cx| {
@@ -263,6 +275,7 @@ impl Desk {
                         session: None,
                         revision,
                         work: &work,
+                        alerts: &alerts,
                     };
                     output::write(Format::Pdf, &markdown, beside.as_deref(), &target)
                         .map(|page| (page, pdf))

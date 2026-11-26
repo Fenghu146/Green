@@ -123,3 +123,6 @@ $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
 Write-Host ""
 Write-Host "zip:  $zip"
 Write-Host "sha256: $hash"
+
+# The zip is the deliverable; the stage would otherwise sit at gigabytes.
+Remove-Item -Recurse -Force $stage

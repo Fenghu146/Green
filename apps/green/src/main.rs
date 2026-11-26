@@ -16,6 +16,7 @@ mod export;
 mod finding;
 mod folder;
 mod keys;
+mod licenses;
 mod look;
 mod output;
 mod outside;

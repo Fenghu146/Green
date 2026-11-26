@@ -20,6 +20,10 @@
 
 - 列表项、alert 正文、表格单元格内嵌 Block。v1 的 Block 契约把它们定成字符串；要做就是 `apiVersion += 1`，并按约定保留 v1 两个小版本。
 
+## 打包与便携
+
+- 便携模式（`<exe>/data` 存在即用）现在是 `apps/green/src/portable.rs` 的产品策略，`crates/` 层不知道“便携”这个概念。若将来多个 app 共用这套策略，再把它上移进 `ely-platform`。
+
 ## 平台
 
 - Linux / macOS 目标。v1 只做 Windows（`docs/design.md` §1.5），非 Windows 的编译与运行都没验过；`--capture` 只接 DirectX 的离屏读回。要做先改 §1.5 的范围。

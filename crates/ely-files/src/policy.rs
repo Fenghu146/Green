@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 mod tests;
 
-/// The debounce after typing stops: Mark's 1 second (§6.2).
-pub const DEBOUNCE: Duration = Duration::from_secs(1);
+/// The debounce after typing stops: Mark's 800 ms (§6.2).
+pub const DEBOUNCE: Duration = Duration::from_millis(800);
 
 /// How an app saves (§6.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

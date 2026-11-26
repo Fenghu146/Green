@@ -184,7 +184,7 @@ fn the_paragraph_and_format_menus_follow_typora(cx: &mut TestAppContext) {
     let (desk, cx, _files) = opened("a\n", cx);
     let menus = desk.read_with(cx, |desk, cx| crate::keys::menus(&desk.look, None, cx));
     let named: Vec<String> = menus.iter().map(|menu| menu.name.to_string()).collect();
-    assert_eq!(named, ["Edit", "Paragraph", "Format", "View"]);
+    assert_eq!(named, ["Edit", "Paragraph", "Format", "View", "Help"]);
     let table = [
         "Insert Table",
         "-",

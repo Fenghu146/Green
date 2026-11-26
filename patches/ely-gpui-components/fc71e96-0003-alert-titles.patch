@@ -1,0 +1,93 @@
+baseline: ely-gpui-components fc71e964088e0de2a81abff572a5684be17ebfd4, the rev Cargo.toml pins
+why: `AlertTitles` is a GPUI global holding the five alert titles in `AlertKind`'s order, so the app can inject its translated ones through i18n::install_as. With no global set, alert() still uses `kind.title()` (GitHub's English), so other callers are unchanged.
+bump: If the fork grows its own injectable alert titles, drop this; ely-ui's i18n::install_as sets the global through the export in ely-documents.
+
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs b/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs
+index 89d5dc7..cceb1dd 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs
+@@ -67,7 +67,7 @@ pub use pages::{PageCover, PageIcon};
+ pub use picture::{HeldPicture, Pictures};
+ pub use print::{Margins, Paper, PrintPreview, PrintSettings, sheet};
+ pub use reading::{Footnote, Glossary, ReadingProgress, TooltipTerm, ZenMode};
+-pub use render::{MarkdownRenderer, RightPress};
++pub use render::{AlertTitles, MarkdownRenderer, RightPress};
+ pub use rich::RichTextEditor;
+ pub use templates::{Template, TemplatePicker};
+ pub use thumbs::PageThumbnailList;
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/render.rs b/vendor/ely-gpui-components/crates/ely-documents/src/render.rs
+index aa04e7a..694c532 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/render.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/render.rs
+@@ -22,6 +22,7 @@ use crate::{
+ };
+ 
+ mod blocks;
++pub use blocks::AlertTitles;
+ mod found;
+ mod math_text;
+ mod point;
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/render/blocks.rs b/vendor/ely-gpui-components/crates/ely-documents/src/render/blocks.rs
+index 4117893..6a356ef 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/render/blocks.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/render/blocks.rs
+@@ -1,6 +1,6 @@
+ use gpui::{
+-    AnyElement, App, FontWeight, IntoElement, MouseButton, ParentElement, Role, Styled, StyledText,
+-    div, prelude::*, svg,
++    AnyElement, App, FontWeight, Global, IntoElement, MouseButton, ParentElement, Role, SharedString,
++    Styled, StyledText, div, prelude::*, svg,
+ };
+ 
+ use super::{Draw, LINE, point::point_lines};
+@@ -10,6 +10,41 @@ use crate::{
+     tree::{AlertKind, DocumentHeading, Node},
+ };
+ 
++/// The titles an alert is drawn under, in `AlertKind`'s order: note, tip,
++/// important, warning, caution. Unset, GitHub's English stands.
++#[derive(Clone, Debug)]
++pub struct AlertTitles(pub [SharedString; 5]);
++
++impl AlertTitles {
++    /// The titles in force; GitHub's English when the app set none.
++    pub fn current(cx: &App) -> [SharedString; 5] {
++        match cx.try_global::<Self>() {
++            Some(titles) => titles.0.clone(),
++            None => [
++                AlertKind::Note,
++                AlertKind::Tip,
++                AlertKind::Important,
++                AlertKind::Warning,
++                AlertKind::Caution,
++            ]
++            .map(|kind| kind.title().into()),
++        }
++    }
++}
++
++impl Global for AlertTitles {}
++
++/// Where `kind` sits in [`AlertTitles`].
++fn index(kind: AlertKind) -> usize {
++    match kind {
++        AlertKind::Note => 0,
++        AlertKind::Tip => 1,
++        AlertKind::Important => 2,
++        AlertKind::Warning => 3,
++        AlertKind::Caution => 4,
++    }
++}
++
+ impl Draw<'_> {
+     /// A list; bullets turn with depth, as browsers draw them.
+     pub(super) fn list(
+@@ -137,7 +172,7 @@ impl Draw<'_> {
+                     .font_weight(FontWeight::MEDIUM)
+                     .text_color(tone)
+                     .child(Icon::new(icon).size(IconSize::Sm).color(tone))
+-                    .child(kind.title()),
++                    .child(AlertTitles::current(cx)[index(kind)].clone()),
+             )
+             .child(
+                 div()
