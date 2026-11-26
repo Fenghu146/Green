@@ -1,4 +1,5 @@
 baseline: ely-gpui-components fc71e964088e0de2a81abff572a5684be17ebfd4, the rev Cargo.toml pins
+why: `AlertTitles` is a GPUI global holding the five alert titles in `AlertKind`'s order, so the app can inject its translated ones through i18n::install_as. With no global set, alert() still uses `kind.title()` (GitHub's English), so other callers are unchanged.
 bump: If the fork grows its own injectable alert titles, drop this; ely-ui's i18n::install_as sets the global through the export in ely-documents.
 
 diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs b/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs
