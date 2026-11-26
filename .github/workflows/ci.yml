@@ -83,7 +83,9 @@ jobs:
         run: scripts/skips.sh tests.log
       # The gate is the exit code: a log with only #[ignore]d tests must be
       # green, a SKIP: line must be red. Re-run both cases on every build so
-      # a trailing command's status cannot turn this back into a false red.
+      # that contract stays explicit. Run 45808353158 was red for a different
+      # reason: cargo test exited 101 on the Node plugin test (process.rs:154);
+      # this step succeeded. See STATUS.md.
       - name: skips.sh self-test
         shell: bash
         run: scripts/skips-self-test.sh

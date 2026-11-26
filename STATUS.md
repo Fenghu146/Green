@@ -15,3 +15,7 @@
 - **`D:\cargo-target` 下的 `debug` / `release` / `release-fast` 是无主池。** 机器级 `CARGO_TARGET_DIR` 保留，它拦住"仓库里长出 `target\`"那类事故；代价是没设 per-line target dir 的构建全落进这三个扁平目录，所以只要没有构建在跑就整个删掉。判定"在跑"以 `<profile>\.cargo-lock` 能否独占打开为准（cargo 把它建在 profile 目录里，不在 target 根），再叠加无 `cargo`/`rustc` 进程、15 分钟无写入。每条线仍然必须显式设 `CARGO_TARGET_DIR=D:\cargo-target\<line>`，不设就是占着无主池。
 - 回收磁盘用 `scripts/disk-prune`（dry run 先看判决），删除前脚本会重探一次锁。
 - **已知债：磁盘阈值散在三处**（`.github/workflows/ci.yml` 的 runner 数字、`scripts/disk.sh` 的 30/50、`scripts/disk-prune` 的判定逻辑），迟早会分叉。应收口到一处：阈值只写在 `disk.sh`，CI 只调用它，`disk-prune` 只读它的默认值。
+
+## 已查明的 CI 红（别再归错因）
+
+- run `45808353158`（head `ffe922d`）的 `test` job 红**不是 `skips.sh` 假红**：第 6 步 `cargo test --workspace` 退出 101，`-p green-plugins --test process` 的 `the_shipped_log_plugin_speaks_the_same_contract_from_node` 在 `crates/green-plugins/tests/process.rs:154` 对 `Option<&[Block]>` 的 `.expect("blocks")` panic（该二进制 14 passed / 1 failed）；第 7 步 `scripts/skips.sh` 是 success，日志里没有 `SKIP:` 或 `GREEN_TYPST`。真因是插件测试失败，由另一条线修。
