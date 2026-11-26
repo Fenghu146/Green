@@ -62,6 +62,8 @@ pub struct Desk {
     /// The copy being converted; a newer one drops it.
     pub(crate) copying: Option<gpui::Task<()>>,
     pub(crate) tab_asked: Option<ely_ui::menu::Offer<PathBuf>>,
+    /// A licence page's load is in: its tab is marked when it lands.
+    pub licensing: bool,
 }
 
 impl Host for Desk {
@@ -85,6 +87,41 @@ impl Host for Desk {
     /// A quit records the open tabs first.
     fn quitting(&mut self, cx: &mut Context<Self>) {
         self.leave(cx);
+    }
+
+    /// A licence page lands: named, read-only, and no document to keep.
+    fn tab_opened(&mut self, id: u64, cx: &mut Context<Self>) {
+        if !self.licensing {
+            return;
+        }
+        self.licensing = false;
+        // A failed copy lands no tab; one without the page is not ours.
+        let ours = self.tab(id).is_some_and(|tab| tab.work.join(crate::licenses::PAGE).is_file());
+        if !ours {
+            return;
+        }
+        let title = text(cx, "licenses.title", &[]);
+        if let Some(tab) = self.tab_mut(id) {
+            tab.extra.special = true;
+            tab.name = title;
+        }
+        let this = cx.entity().downgrade();
+        cx.spawn(async move |_, cx| {
+            let shown = ely_office::in_window(&this, cx, |desk: &mut Desk, window, cx| {
+                if let Some(view) = desk.tab(id).map(|tab| tab.view.clone()) {
+                    view.update(cx, |view, cx| view.switch(Mode::Preview, window, cx));
+                }
+            });
+            if let Err(error) = shown {
+                log::warn!("mark: the licence page stays as it opened: {error:#}");
+            }
+        })
+        .detach();
+    }
+
+    /// Tab `id` is a page: no save writes it.
+    fn sealed(&self, id: u64) -> bool {
+        self.tab(id).is_some_and(|tab| tab.extra.special)
     }
 
     /// A quit or close stopped: the kept list follows again.
@@ -210,6 +247,7 @@ pub(crate) fn open_in(
             finding: None,
             copying: None,
             tab_asked: None,
+            licensing: false,
         }
     });
     crate::remote::listen(&desk, cx);
@@ -346,6 +384,10 @@ impl Desk {
     }
 
     pub(crate) fn switch(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
+        // A page shows one way: preview, which takes no edits.
+        if self.active_tab().is_some_and(|tab| tab.extra.special) {
+            return;
+        }
         if let Some(view) = self.active_view() {
             view.update(cx, |view, cx| view.switch(mode, window, cx));
         }

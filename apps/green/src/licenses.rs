@@ -9,7 +9,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ely_gpui_component::primitives::Severity;
 use ely_office::prelude::*;
 use ely_ui::i18n::text;
 use gpui::{App, Context};
@@ -17,26 +16,29 @@ use gpui::{App, Context};
 use crate::desk::Desk;
 
 impl Desk {
-    /// Opens the licence page, from the package's files, as a tab of its own.
+    /// Opens the licence page, from the package's files, as a read-only tab.
     pub fn open_licenses(&mut self, cx: &mut Context<Self>) {
-        let Some(data) = self.recent_file.parent().map(Path::to_path_buf) else {
-            let error = self.recent_file.display().to_string();
-            return self.toast(text(cx, "toast.open_failed", &[("error", &error)]), Severity::Warning, cx);
-        };
-        let path = data.join(PAGE);
+        if let Some(id) = self
+            .core
+            .tabs
+            .iter()
+            .find(|tab| tab.extra.special)
+            .map(|tab| tab.id)
+        {
+            self.core_mut().set_active(Some(id));
+            return cx.notify();
+        }
         let page = match page(cx) {
             Ok(page) => page,
             Err(error) => format!("# {}\n\n{error}\n", text(cx, "licenses.title", &[])),
         };
-        if let Err(error) = fs::write(&path, page) {
-            let error = format!("{}: {error}", path.display());
-            return self.toast(text(cx, "toast.open_failed", &[("error", &error)]), Severity::Warning, cx);
-        }
-        self.open_path(path, cx);
+        // The tab lands on the background reader; `tab_opened` names and seals it.
+        self.licensing = true;
+        self.new_from_text(PAGE, &page, cx);
     }
 }
 
-/// The page's file name; a real file, so the tab says its name.
+/// The page's file name: the copy in the work folder, never a user file.
 pub(crate) const PAGE: &str = "Licences.md";
 
 /// The page, from `root`'s licence files.
@@ -171,7 +173,6 @@ fn extension(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{copyright, licenses, page_at, prose, summary};
-    use crate::desk::Desk;
 
     const NOTICES: &str = "Green's third-party notices\n===========================\n\nAssets\n------\n\nNoto\n\nCrates\n------\n\n\
 ================================================================================\nApache License 2.0 (Apache-2.0)\nUsed by:\n  - a 1.0.0\n\
@@ -273,23 +274,38 @@ mod tests {
     }
 
     #[gpui::test]
-    fn the_action_opens_the_page_from_the_package_once(cx: &mut gpui::TestAppContext) {
+    fn the_action_opens_one_read_only_page(cx: &mut gpui::TestAppContext) {
         let data = tempfile::tempdir().unwrap();
         let (desk, cx) = crate::desk::tests::start(cx, data.path());
         cx.dispatch_action(crate::keys::OpenLicenses);
         cx.run_until_parked();
+        let title = cx.update(|_, cx| ely_ui::i18n::text(cx, "licenses.title", &[]).to_string());
+        let (names, special, mode) = desk.read_with(cx, |desk, cx| {
+            let tab = desk.core.tabs.last().expect("a tab");
+            (
+                desk.core.tabs.iter().map(|tab| tab.name.to_string()).collect::<Vec<_>>(),
+                tab.extra.special,
+                tab.view.read(cx).mode,
+            )
+        });
+        assert_eq!(names, vec![title]);
+        assert!(special, "the page is not a document");
+        assert_eq!(mode, crate::view::Mode::Preview);
         let page = desk.read_with(cx, |desk, cx| {
             desk.active_view().expect("a tab").read(cx).document().read(cx).text(cx)
         });
         assert!(page.starts_with("# Licences"), "{}", &page[..page.len().min(200)]);
         assert!(page.contains("## GNU GPL v3"), "{}", &page[..page.len().min(200)]);
         assert!(page.contains("NotoSansCJKsc-Regular.otf"), "{}", &page[..page.len().min(200)]);
-        let names = |desk: &Desk, _: &gpui::App| -> Vec<String> {
-            desk.core.tabs.iter().map(|tab| tab.name.to_string()).collect()
-        };
-        assert_eq!(desk.read_with(cx, names), vec!["Licences.md"]);
+        // Preview is the only mode a page shows in.
+        cx.dispatch_action(crate::keys::VisualMode);
+        cx.run_until_parked();
+        let mode = desk.read_with(cx, |desk, cx| {
+            desk.core.tabs.last().expect("a tab").view.read(cx).mode
+        });
+        assert_eq!(mode, crate::view::Mode::Preview, "a page takes no other mode");
         cx.dispatch_action(crate::keys::OpenLicenses);
         cx.run_until_parked();
-        assert_eq!(desk.read_with(cx, names), vec!["Licences.md"], "a second open focuses the page");
+        assert_eq!(desk.read_with(cx, |desk, _| desk.core.tabs.len()), 1, "one page tab");
     }
 }

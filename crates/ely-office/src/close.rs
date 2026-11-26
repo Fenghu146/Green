@@ -23,6 +23,7 @@ pub trait Closing: Host {
 
     fn on_save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
         match self.core().active() {
+            Some(id) if self.sealed(id) => {}
             Some(id) => self.save(id, None, window, cx),
             None => self.no_document(cx),
         }
@@ -30,6 +31,7 @@ pub trait Closing: Host {
 
     fn on_save_as(&mut self, _: &SaveAs, window: &mut Window, cx: &mut Context<Self>) {
         match self.core().active() {
+            Some(id) if self.sealed(id) => {}
             Some(id) => self.save_as(id, None, window, cx),
             None => self.no_document(cx),
         }
