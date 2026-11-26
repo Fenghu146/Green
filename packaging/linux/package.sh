@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Usage: package.sh [--desktop] <slug>; the AppDir bundle.sh packs.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+desktop_only=
+[ "${1:-}" = --desktop ] && {
+  desktop_only=1
+  shift
+}
+slug=${1:?app slug, such as ely-doc}
+
+row=$(awk -F'\t' -v slug="$slug" '$1 == slug { print $2 "\t" $3 }' "$root/packaging/apps.tsv")
+[ -n "$row" ] || {
+  echo "package.sh: unknown app $slug" >&2
+  exit 1
+}
+name=${row%%$'\t'*}
+categories=${row##*$'\t'}
+# Ely is MIT; bundled engines keep their licences.
+license=$(awk -F'\t' -v slug="$slug" '$1 == slug { print $5 }' "$root/packaging/apps.tsv")
+# The types it opens, from packaging/types.tsv; none drops the line.
+mimes=$(awk -F'\t' -v slug="$slug" '$1 == slug && !seen[$3]++ { printf "%s;", $3 }' "$root/packaging/types.tsv")
+# A URL scheme needs links, not only files.
+args=$(awk -F'\t' -v slug="$slug" '$1 == slug && $2 ~ /:$/ { found = 1 } END { print found ? "%U" : "%F" }' "$root/packaging/types.tsv")
+desktop_entry() {
+  sed -e "s/@NAME@/$name/" -e "s/@SLUG@/$slug/g" -e "s/@CATEGORIES@/$categories/" -e "s|@MIME@|$mimes|" -e "s/@ARGS@/$args/" \
+    -e '/^MimeType=$/d' "$root/packaging/linux/app.desktop.in"
+}
+
+if [ -n "$desktop_only" ]; then
+  desktop_entry
+  exit 0
+fi
+
+[ "$(uname)" = Linux ] || {
+  echo "package.sh: Linux only" >&2
+  exit 1
+}
+command -v patchelf >/dev/null || {
+  echo "package.sh: no patchelf; run in packaging/linux/container.sh" >&2
+  exit 1
+}
+arch=$(uname -m)
+case $arch in
+  x86_64)
+    nfpm_arch=x86_64
+    pack_sha=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+    deploy_sha=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+    runtime_sha=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+    nfpm_sha=0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783
+    ;;
+  *)
+    echo "package.sh: no packaging tools for $arch" >&2
+    exit 1
+    ;;
+esac
+icon=$root/assets/icons/$slug.png
+[ -f "$icon" ] || {
+  echo "package.sh: $icon is missing" >&2
+  exit 1
+}
+
+fetch_tool() { # file url sha256
+  if [ ! -f "$1" ]; then
+    mkdir -p "$root/engines"
+    curl -fsSL -o "$1" "$2"
+  fi
+  echo "$3  $1" | sha256sum -c - >/dev/null
+  chmod +x "$1"
+}
+pack=$root/engines/appimagetool-1.9.1-$arch.AppImage
+deploy=$root/engines/linuxdeploy-1-alpha-20251107-1-$arch.AppImage
+runtime=$root/engines/type2-runtime-20251108-$arch
+nfpm_tar=$root/engines/nfpm_2.47.0_Linux_$nfpm_arch.tar.gz
+fetch_tool "$pack" "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-$arch.AppImage" "$pack_sha"
+fetch_tool "$deploy" "https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-$arch.AppImage" "$deploy_sha"
+fetch_tool "$runtime" "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-$arch" "$runtime_sha"
+fetch_tool "$nfpm_tar" "https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_$nfpm_arch.tar.gz" "$nfpm_sha"
+nfpm=$root/engines/nfpm-2.47.0-$arch
+if [ ! -x "$nfpm" ]; then
+  tar -xzf "$nfpm_tar" -O nfpm >"$nfpm.part"
+  chmod +x "$nfpm.part"
+  mv "$nfpm.part" "$nfpm"
+fi
+
+stage=$root/target/stage/$slug
+"$root/packaging/stage.sh" "$slug" "$stage"
+work=$root/target/package/$slug
+rm -rf "$work"
+mkdir -p "$work"
+desktop_entry >"$work/$slug.desktop"
+appdir=$work/$name.AppDir
+bin=$appdir/usr/bin
+mkdir -p "$bin"
+cp -R "$stage"/. "$bin/"
+deployed=(--executable "$bin/$slug")
+for helper in ely-lok-worker ely-pdf-worker; do
+  if [ -f "$bin/$helper" ]; then
+    deployed+=(--executable "$bin/$helper")
+  fi
+done
+
+# The system's libdbus serves, with all it loads.
+for lib in libdbus-1 libsystemd libmount libblkid libselinux libpcre2-8 libcap libgcrypt liblz4 liblzma; do
+  deployed+=(--exclude-library "$lib.so*")
+done
+# linuxdeploy bundles libraries and fails on a missing one.
+"$deploy" --appimage-extract-and-run --appdir "$appdir" "${deployed[@]}" \
+  --desktop-file "$work/$slug.desktop" --icon-file "$icon"
+
+
+broken() {
+  echo "package.sh: $*" >&2
+  exit 1
+}
+# gpui loads these by name.
+needed=(libvulkan.so.1 libwayland-client.so.0)
+# Libraries the AppDir needs and does not bundle.
+listed=$("$root/packaging/linux/elfs.sh" "$appdir" "$work") || exit 1
+[ -z "$listed" ] || mapfile -t -O "${#needed[@]}" needed <<<"$listed"
+# The newest glibc a packaged file needs.
+find "$appdir" -type f -print0 >"$work/packaged.list" || broken "cannot list $appdir"
+glibc=$(while IFS= read -r -d '' file; do
+  magic=$(head -c 4 "$file" | od -An -c | tr -d ' ') || exit 1
+  [ "$magic" != '177ELF' ] || readelf -VW "$file" || exit 1
+done <"$work/packaged.list" | grep -o 'GLIBC_[0-9][0-9.]*' | sort -uV | tail -n 1) ||
+  broken "cannot read the glibc versions under $appdir"
+glibc=${glibc#GLIBC_}
+deb=() pacman=() rpm=("libc.so.6(GLIBC_$glibc)(64bit)")
+while IFS= read -r lib; do
+  row=$(awk -F'\t' -v lib="$lib" '$1 == lib' "$root/packaging/linux/depends.tsv")
+  [ -n "$row" ] || {
+    broken "$lib is in no row of packaging/linux/depends.tsv"
+  }
+  IFS=$'\t' read -r _ deb_name pacman_name <<<"$row"
+  # glibc's libraries share that floor.
+  if [ "$pacman_name" = glibc ]; then
+    deb_name="libc6 (>= $glibc)" pacman_name="glibc>=$glibc"
+  fi
+  deb+=("$deb_name")
+  pacman+=("$pacman_name")
+  rpm+=("$lib()(64bit)")
+done < <(printf '%s\n' "${needed[@]}" | sort -u)
+# bundle.sh reads these lists for the suite.
+printf '%s\n' "${deb[@]}" | sort -u >"$work/depends.deb"
+printf '%s\n' "${rpm[@]}" | sort -u >"$work/depends.rpm"
+printf '%s\n' "${pacman[@]}" | sort -u >"$work/depends.archlinux"
+echo "$appdir"

@@ -1,0 +1,138 @@
+//! Picks saved in the background; each key's latest wins.
+
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+
+use ely_gpui_component::{
+    buttons::SegmentedControl,
+    forms::{Choice, Select},
+};
+use ely_platform::settings::{
+    DOC_ZOOM, DOC_ZOOMS, DocZoom, LANGUAGE, LANGUAGES, Language, PAPER, Paper, Sides, TWO_SIDED, UI_TEXT_SIZE, UI_TEXT_SIZES, word,
+};
+use gpui::{App, AsyncApp, Global};
+use serde_json::Value;
+
+use crate::i18n::text;
+
+/// Turns and waiting picks, app-wide: they outlive a window.
+#[derive(Default)]
+struct Picks {
+    turns: HashMap<&'static str, Arc<AtomicU64>>,
+    /// Picks whose save waits; their controls show them.
+    waiting: HashMap<&'static str, Value>,
+}
+
+impl Global for Picks {}
+
+/// Saves `key`; a later pick skips this write.
+pub(super) fn pick(key: &'static str, value: Value, cx: &mut App) {
+    let picks = cx.default_global::<Picks>();
+    picks.waiting.insert(key, value.clone());
+    let latest = Arc::clone(picks.turns.entry(key).or_default());
+    let asked = latest.fetch_add(1, Ordering::SeqCst) + 1;
+    let write = super::saved(key, value, Some((Arc::clone(&latest), asked)), cx);
+    cx.refresh_windows();
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        let written = write.await;
+        // Saved: the file's value shows; failed: the pick stays.
+        cx.update(|cx| {
+            if written && latest.load(Ordering::SeqCst) == asked {
+                cx.global_mut::<Picks>().waiting.remove(key);
+                cx.refresh_windows();
+            }
+        });
+    })
+    .detach();
+}
+
+/// `key`'s pick still waiting to be saved.
+pub(super) fn waiting(key: &'static str, cx: &App) -> Option<Value> {
+    cx.try_global::<Picks>()?.waiting.get(key).cloned()
+}
+
+/// One segment per size; a waiting pick shows.
+pub(super) fn text_size(stored: u32, cx: &App) -> SegmentedControl {
+    let shown = waiting(UI_TEXT_SIZE, cx).and_then(|size| size.as_u64()).map_or(stored, |size| size as u32);
+    let (least, most, _) = UI_TEXT_SIZES;
+    (least..=most)
+        .fold(SegmentedControl::new("settings-ui-size", shown.to_string()), |control, size| {
+            control.segment(size.to_string(), format!("{size} px"), None)
+        })
+        .on_change(|picked, _, cx| pick(UI_TEXT_SIZE, Value::from(picked.parse::<u32>().expect("a size segment")), cx))
+}
+
+/// Automatic or a percent, for documents opened next.
+pub(super) fn doc_zoom(stored: DocZoom, cx: &App) -> Select {
+    let shown = match waiting(DOC_ZOOM, cx).unwrap_or_else(|| stored.value()) {
+        Value::String(word) => word,
+        percent => percent.to_string(),
+    };
+    let choices = std::iter::once(Choice::new("auto", text(cx, "settings.zoom.auto", &[])))
+        .chain(DOC_ZOOMS.map(|percent| Choice::new(percent.to_string(), format!("{percent}%"))));
+    Select::new("settings-doc-zoom", choices)
+        .label(text(cx, "settings.zoom", &[])).selected(shown).on_change(|picked, _, cx| {
+        let zoom = match picked.as_ref() {
+            "auto" => DocZoom::Auto,
+            percent => DocZoom::Percent(percent.parse().expect("a zoom choice")),
+        };
+        pick(DOC_ZOOM, zoom.value(), cx)
+    })
+}
+
+/// Languages no native speaker has proofread yet.
+const PREVIEW: [&str; 6] = ["de-DE", "es-ES", "fr-FR", "ja-JP", "ko-KR", "vi-VN"];
+
+/// System, then each language in its own name.
+pub(super) fn languages(cx: &App) -> Vec<Choice> {
+    let named = |(tag, name): (&'static str, &'static str)| match PREVIEW.contains(&tag) {
+        true => Choice::new(tag, text(cx, "settings.language.preview", &[("name", name)])),
+        false => Choice::new(tag, name),
+    };
+    std::iter::once(Choice::new(Language::System.word(), text(cx, "settings.language.system", &[])))
+        .chain(LANGUAGES.map(named))
+        .collect()
+}
+
+/// The interface language apps start in.
+pub(super) fn language(stored: Language, cx: &App) -> Select {
+    let shown = match waiting(LANGUAGE, cx) {
+        Some(Value::String(word)) => word,
+        _ => stored.word().to_string(),
+    };
+    Select::new("settings-language", languages(cx))
+        .label(text(cx, "settings.language", &[]))
+        .selected(shown)
+        .on_change(|picked, _, cx| pick(LANGUAGE, Value::String(picked.to_string()), cx))
+}
+
+/// The paper new documents start on.
+pub(super) fn paper(stored: Paper, cx: &App) -> Select {
+    let shown = match waiting(PAPER, cx) {
+        Some(Value::String(stored)) => stored,
+        _ => word(&Paper::ALL, &stored).to_string(),
+    };
+    let choices = Paper::ALL.map(|(_, stored)| Choice::new(stored, text(cx, &format!("settings.paper.{stored}"), &[])));
+    Select::new("settings-paper", choices)
+        .label(text(cx, "settings.paper", &[]))
+        .selected(shown)
+        .on_change(|picked, _, cx| pick(PAPER, Value::String(picked.to_string()), cx))
+}
+
+/// The sides the print dialog starts on.
+pub(super) fn two_sided(stored: Sides, cx: &App) -> Select {
+    let shown = match waiting(TWO_SIDED, cx) {
+        Some(Value::String(stored)) => stored,
+        _ => word(&Sides::ALL, &stored).to_string(),
+    };
+    let choices = Sides::ALL.map(|(_, stored)| Choice::new(stored, text(cx, &format!("settings.two_sided.{stored}"), &[])));
+    Select::new("settings-two-sided", choices)
+        .label(text(cx, "settings.two_sided", &[]))
+        .selected(shown)
+        .on_change(|picked, _, cx| pick(TWO_SIDED, Value::String(picked.to_string()), cx))
+}

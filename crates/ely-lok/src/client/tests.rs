@@ -1,0 +1,400 @@
+use std::path::PathBuf;
+
+use super::*;
+
+mod analysis;
+mod markdown;
+mod chart_place;
+mod autospace;
+mod tabs;
+mod borders;
+mod backslash;
+mod by_address;
+mod by_format;
+mod by_range;
+mod by_structure;
+mod cell_edit;
+mod cell_looks;
+mod charts;
+mod dates;
+mod died;
+mod check;
+mod carry;
+mod connectors;
+mod commands;
+#[cfg(windows)]
+mod dde;
+mod docx;
+mod opendoc;
+mod fallback;
+mod filter;
+mod fonts;
+mod format;
+mod formula;
+mod handouts;
+#[cfg(windows)]
+mod handles;
+mod idle;
+mod booleans;
+mod included;
+mod indent;
+mod independent;
+mod kept;
+mod macros;
+mod many;
+mod pivot;
+mod spill;
+pub(crate) mod input;
+mod inline;
+mod inserted;
+mod freed;
+mod latency;
+pub(crate) mod layout;
+mod linked;
+mod long;
+mod gone;
+mod logs;
+mod links;
+mod media;
+mod menus;
+mod motion;
+mod ole_links;
+mod output;
+mod packed;
+mod paint;
+mod playlist;
+pub(crate) mod reading;
+mod print;
+mod profile;
+mod refs;
+mod r_macros;
+mod roundtrip;
+mod rules;
+mod scripted;
+mod scaled_pictures;
+mod seam;
+mod sheet;
+mod trigger;
+pub(crate) mod show;
+mod slide_image;
+mod slide_text;
+mod slides;
+mod spanned;
+pub(crate) mod snapshot;
+mod stored_pictures;
+mod stop;
+mod tools;
+mod word;
+mod workbook;
+mod zip;
+
+/// The pinned LibreOffice commit the build must report.
+const PINNED_BUILD: &str = "8221e31";
+
+/// The pinned build, or None when absent.
+pub(crate) fn install() -> Option<PathBuf> {
+    crate::test_install()
+}
+
+/// Ends a stuck worker by its process id.
+pub(crate) fn kill(pid: u32) {
+    let pid = pid.to_string();
+    let status = if cfg!(windows) {
+        std::process::Command::new("taskkill").args(["/F", "/PID", &pid]).status()
+    } else {
+        std::process::Command::new("kill").args(["-9", &pid]).status()
+    };
+    assert!(status.expect("kill runs").success(), "the worker {pid} ends");
+}
+
+/// A tiny flat-XML document; no zip needed.
+pub(crate) const FODT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:body><office:text><text:p>Hello 世界</text:p></office:text></office:body>
+</office:document>"#;
+
+/// Clicks (x, y) twips: left press and release.
+pub(crate) fn click(worker: &mut Worker, doc: &Doc, x: i32, y: i32) {
+    for kind in [0, 1] {
+        let event = Mouse {
+            kind,
+            x,
+            y,
+            count: 1,
+            buttons: 1,
+            modifiers: 0,
+        };
+        worker.post_mouse(doc, event).expect("the click posts");
+    }
+}
+
+/// A wait for a condition fails only past this.
+pub(crate) const HANG: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Polls past `from` until `done` or `wait`; rects pile up.
+pub(crate) fn poll_until(
+    worker: &mut Worker,
+    doc: &Doc,
+    from: &Events,
+    wait: std::time::Duration,
+    done: impl Fn(&Events) -> bool,
+) -> Events {
+    let deadline = std::time::Instant::now() + wait;
+    let mut seen = Events {
+        rects: Vec::new(),
+        all: false,
+        states: Vec::new(),
+        blocked: Vec::new(),
+        links: Vec::new(),
+        ..from.clone()
+    };
+    loop {
+        let batch = worker
+            .poll_events(doc, seen.seq, 250)
+            .expect("the poll returns");
+        let mut rects = std::mem::take(&mut seen.rects);
+        let mut states = std::mem::take(&mut seen.states);
+        let mut blocked = std::mem::take(&mut seen.blocked);
+        let mut links = std::mem::take(&mut seen.links);
+        let all = seen.all || batch.all;
+        rects.extend(batch.rects.iter().copied());
+        states.extend(batch.states.iter().cloned());
+        blocked.extend(batch.blocked.iter().cloned());
+        links.extend(batch.links.iter().cloned());
+        seen = Events {
+            rects,
+            all,
+            states,
+            blocked,
+            links,
+            ..batch
+        };
+        if done(&seen) || std::time::Instant::now() >= deadline {
+            return seen;
+        }
+    }
+}
+
+fn write(path: &Path, body: &str) {
+    std::fs::write(path, body).expect("the fixture writes");
+}
+
+#[test]
+fn the_worker_round_trips_a_document() {
+    let Some(install) = install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let profile = dir.path().join("配置 profile");
+    let mut worker = Worker::spawn(&install, &profile).expect("the worker spawns");
+    let build = worker.build_id().expect("the build id");
+    assert!(build.contains(PINNED_BUILD), "the pinned build: {build}");
+
+    let source = dir.path().join("note.fodt");
+    write(&source, FODT);
+    let url = crate::file_url(&source);
+    let doc = worker.load(&url).expect("the document loads");
+    let (width, height) = doc.size(&mut worker).expect("the size");
+    assert!(width > 0 || height > 0, "a nonzero document size");
+
+    let odt = dir.path().join("note.odt");
+    doc.save_as(&mut worker, &crate::file_url(&odt), "odt")
+        .expect("the odt save");
+    assert!(odt.try_exists().expect("the odt exists"));
+    let doc2 = worker
+        .load(&crate::file_url(&odt))
+        .expect("the odt reloads");
+    let pdf = dir.path().join("note.pdf");
+    doc2.save_as(&mut worker, &crate::file_url(&pdf), "pdf")
+        .expect("the pdf save");
+    let head = std::fs::read(&pdf).expect("the pdf reads");
+    assert!(head.starts_with(b"%PDF"), "a real PDF comes out");
+    worker.close_doc(doc2).expect("the second doc closes");
+    worker.close_doc(doc).expect("the first doc closes");
+}
+
+#[test]
+fn a_missing_file_is_an_error_never_a_success() {
+    let Some(install) = install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut worker = Worker::spawn(&install, &dir.path().join("profile")).expect("the worker");
+    let missing = dir.path().join("gone.odt");
+    let outcome = worker.load(&crate::file_url(&missing));
+    assert!(outcome.is_err(), "LOK-09: the failure is an error");
+}
+
+#[test]
+fn the_start_check_loads_only_the_app_s_own_module() {
+    let Some(install) = install() else {
+        return eprintln!("SKIP: no pinned LOK build");
+    };
+    // Each probe's own library, as the kernel names it.
+    let modules = [(crate::Probe::Text, "swlo"), (crate::Probe::Sheet, "sclo"), (crate::Probe::Slides, "sdlo")];
+    for (probe, own) in modules {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let mut worker = Worker::launch(&install, &dir.path().join("profile"), probe).expect("the worker");
+        worker.ready().unwrap_or_else(|error| panic!("{probe:?} paints no red: {error}"));
+        // Linux lists what a process mapped.
+        let Ok(mapped) = std::fs::read_to_string(format!("/proc/{}/maps", worker.child.get().expect("the worker process").id())) else {
+            continue;
+        };
+        for (_, module) in modules {
+            assert_eq!(mapped.contains(&format!("lib{module}.so")), module == own, "{probe:?} and lib{module}");
+        }
+    }
+}
+
+#[test]
+fn a_failed_check_refuses_every_later_request() {
+    let Some(install) = install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let profile = dir.path().join("profile");
+    // The self-check cannot write its sample over a folder.
+    std::fs::create_dir_all(profile.join("lok-verify.fodt")).expect("the blocker");
+    let mut worker = Worker::launch(&install, &profile, crate::Probe::Text).expect("the worker");
+    assert!(worker.ready().is_err(), "the check fails");
+    assert!(worker.ready().is_err(), "and stays failed");
+    assert!(worker.load("private:factory/swriter").is_err(), "no document reaches it");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_unpatched_build_is_rejected() {
+    // A plain folder: a mounted .app would be registered.
+    let frameworks = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../engines/lo-official/Contents/Frameworks");
+    if !frameworks.try_exists().expect("the folder check") {
+        eprintln!("SKIP: run scripts/extract-official-lo.sh");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let Err(error) = Worker::spawn(&frameworks, &dir.path().join("profile")) else {
+        panic!("the unpatched build must be rejected");
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData, "{error}");
+    assert!(
+        error.to_string().contains("paints no BGRA red (unpatched"),
+        "rejected for the tile check, not {error}"
+    );
+}
+
+#[test]
+fn shutdown_leaves_no_locks_or_temp() {
+    let Some(install) = install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let profile = dir.path().join("profile");
+    let mut worker = Worker::spawn(&install, &profile).expect("the worker");
+    let source = dir.path().join("note.fodt");
+    write(&source, FODT);
+    let doc = worker
+        .load(&crate::file_url(&source))
+        .expect("the document loads");
+    let lock = dir.path().join(".~lock.note.fodt#");
+    worker.close_doc(doc).expect("the document closes");
+    worker.shutdown().expect("the worker shuts down");
+    assert!(
+        !lock.try_exists().expect("the doc lock check"),
+        "no stale document lock"
+    );
+    assert!(
+        !profile
+            .join(".lock")
+            .try_exists()
+            .expect("the profile lock check"),
+        "no profile lock"
+    );
+    let left: Vec<_> = std::fs::read_dir(profile.join("tmp"))
+        .expect("the temp dir lists")
+        .map(|entry| entry.expect("an entry").path())
+        .collect();
+    assert!(left.is_empty(), "the engine's temp folder is gone: {left:?}");
+}
+
+#[test]
+fn each_load_is_its_own_session() {
+    let Some(install) = install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut worker = Worker::spawn(&install, &dir.path().join("profile")).expect("the worker spawns");
+    let source = dir.path().join("note.fodt");
+    write(&source, FODT);
+    let url = crate::file_url(&source);
+    // Freed native documents reuse addresses; sessions never repeat.
+    let mut old = Vec::new();
+    for _ in 0..4 {
+        let doc = worker.load(&url).expect("loads");
+        assert!(old.iter().all(|seen: &Doc| seen.id != doc.id), "a session came back");
+        worker.close_doc(doc.clone()).expect("closes");
+        old.push(doc);
+    }
+    for doc in &old {
+        assert!(doc.size(&mut worker).is_err(), "a closed session answered");
+    }
+    let doc = worker.load(&url).expect("loads again");
+    worker.post_key(&doc, 'x' as u32, 0).expect("a key");
+    let events = worker.poll_events(&doc, 0, 5_000).expect("events");
+    assert!(events.seq > 0, "the new session's events flow");
+    worker.close_doc(doc).expect("closes");
+}
+
+#[test]
+fn a_document_belongs_to_its_worker() {
+    let Some(install) = install() else {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let source = dir.path().join("note.fodt");
+    write(&source, FODT);
+    let url = crate::file_url(&source);
+    let mut first = Worker::spawn(&install, &dir.path().join("one")).expect("a worker");
+    let mut second = Worker::spawn(&install, &dir.path().join("two")).expect("another worker");
+    let theirs = first.load(&url).expect("loads");
+    let ours = second.load(&url).expect("loads");
+    // Another worker's handle never reaches these documents.
+    assert!(theirs.size(&mut second).is_err(), "another worker's document answered");
+    assert!(second.close_doc(theirs.clone()).is_err(), "another worker's document closed");
+    assert!(ours.size(&mut second).is_ok(), "its own document stays");
+    first.close_doc(theirs).expect("closes");
+    second.close_doc(ours).expect("closes");
+}
+
+#[test]
+fn a_worker_that_cannot_start_says_why() {
+    if install().is_none() {
+        eprintln!("SKIP: no pinned LOK build");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let Err(error) = Worker::spawn(&dir.path().join("no-install"), &dir.path().join("profile")) else {
+        panic!("a worker started without a kernel");
+    };
+    // The worker's own reason, not only a closed pipe.
+    assert!(error.to_string().contains("lok-worker:"), "{error}");
+    // Only records reach the app's log.
+    let mut run = std::process::Command::new(super::install::worker_bin().expect("the worker binary"))
+        .arg(dir.path().join("no-install"))
+        .arg(dir.path().join("again"))
+        .arg("lok-no-kernel")
+        .env_remove("ELY_LOG")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the worker runs");
+    let said = ely_ipc::relay(run.stderr.take().expect("piped stderr"), "test").said();
+    assert!(!run.wait().expect("the worker exits").success(), "the worker started without a kernel");
+    assert!(said.error.as_deref().is_some_and(|reason| reason.starts_with("lok-worker:")), "{said:?}");
+}

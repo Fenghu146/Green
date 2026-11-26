@@ -1,0 +1,484 @@
+use std::{
+    io,
+    path::{Path, PathBuf},
+    sync::mpsc,
+};
+
+use crate::endpoint::{self, Half};
+use crate::handshake::Check;
+use crate::ipc::{self, Pack, Unpack, tag};
+
+pub use crate::events::{A11y, Cell, Events, Function, MIXED, Mark, Rect, Request};
+
+/// The pinned LibreOffice build the worker must report (LOK-01).
+pub const BUILD_ID: &str = "8221e31b3ac356a1623c672912a3d2b492f7e3d1";
+
+mod command;
+mod doc;
+mod feed;
+mod frames;
+mod idle;
+pub use idle::no_idle_engine;
+mod install;
+mod load;
+pub use load::Damaged;
+mod process;
+pub(crate) use process::Process;
+mod stop;
+mod wait;
+pub use install::{install_dir, templates};
+pub use stop::Stopper;
+pub use wait::Waiter;
+#[cfg(any(test, feature = "test-support"))]
+pub use install::test_install;
+use install::worker_bin;
+pub use doc::{Doc, Pdf, Sheet, Sheets};
+pub use feed::Feed;
+#[cfg(test)]
+pub(crate) mod tests;
+
+/// The LOK worker process: spawn, talk frames, shut down (LOK-01).
+pub struct Worker {
+    pub(crate) child: Process,
+    requests: wait::Pipe,
+    /// The request side, until the first request takes it.
+    wiring: Option<mpsc::Receiver<io::Result<Half>>>,
+    /// Answers to requests; None once the worker is gone.
+    replies: mpsc::Receiver<io::Result<(u8, u64, Vec<u8>)>>,
+    feed: Feed,
+    down: bool,
+    /// The last request's id; each reply must carry it.
+    asked: u64,
+    /// This worker among all spawned; its documents carry it.
+    session: u64,
+    pub(crate) stderr: ely_ipc::Relay,
+    pub(crate) check: Check,
+    pub(crate) stopper: Stopper,
+    /// The name new comments sign with, once set.
+    author: Option<String>,
+    /// The build, profile and probes it started with.
+    pub(crate) start: (PathBuf, PathBuf, bool),
+    /// The module the start check loads.
+    pub(crate) probe: crate::Probe,
+    /// The app whose idle engine it took.
+    pub(crate) idle: Option<String>,
+}
+
+/// One painted tile and the generation it matches (LOK-03).
+pub struct Tile {
+    pub generation: u64,
+    pub pixels: Vec<u8>,
+}
+
+/// One LOK mouse event; coordinates in twips.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mouse {
+    /// 0 down, 1 up, 2 move.
+    pub kind: i32,
+    pub x: i32,
+    pub y: i32,
+    pub count: i32,
+    /// 1 left, 2 middle, 4 right.
+    pub buttons: i32,
+    /// vcl modifier bits.
+    pub modifiers: i32,
+}
+
+/// Whether `error` refused a request made for an older state.
+pub fn is_stale(error: &io::Error) -> bool {
+    error.to_string().starts_with(ipc::STALE)
+}
+
+/// Whether `error` refused an undo or redo with no history.
+pub fn is_nothing(error: &io::Error) -> bool {
+    error.to_string().starts_with(ipc::NOTHING)
+}
+
+/// A start's channels: the request side and the replies.
+struct Wires {
+    wiring: mpsc::Receiver<io::Result<Half>>,
+    replies: mpsc::Receiver<io::Result<(u8, u64, Vec<u8>)>>,
+    feed: Feed,
+}
+
+static SESSIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// A start error that names `path`, logged whole.
+fn at(path: &Path) -> impl FnOnce(io::Error) -> io::Error + '_ {
+    move |error| {
+        log::error!("lok: the worker did not start: {}: {error}", path.display());
+        io::Error::new(error.kind(), format!("{}: {error}", path.display()))
+    }
+}
+
+impl Worker {
+    /// Spawns the worker against `install` with an isolated profile (LOK-01).
+    pub fn spawn(install: &Path, profile_dir: &Path) -> io::Result<Self> {
+        let mut worker = Self::spawn_mode(install, profile_dir, false, None)?;
+        worker.ready()?;
+        Ok(worker)
+    }
+
+    /// Starts the process only; the first request checks it.
+    pub fn launch(install: &Path, profile_dir: &Path, probe: crate::Probe) -> io::Result<Self> {
+        let mut worker = Self::spawn_mode(install, profile_dir, false, None)?;
+        worker.probe = probe;
+        Ok(worker)
+    }
+
+    /// Spawns with the dev-only probes on, for tests.
+    pub fn spawn_dev(install: &Path, profile_dir: &Path) -> io::Result<Self> {
+        let mut worker = Self::spawn_mode(install, profile_dir, true, None)?;
+        worker.ready()?;
+        Ok(worker)
+    }
+
+    /// Spawns, with dev probes or idle on a name.
+    pub(crate) fn spawn_mode(
+        install: &Path,
+        profile_dir: &Path,
+        dev: bool,
+        idle: Option<(&str, std::fs::File)>,
+    ) -> io::Result<Self> {
+        let session = SESSIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let private = endpoint::name(session)?;
+        let (public, log) = idle.unzip();
+        let start = (install.to_path_buf(), profile_dir.to_path_buf(), dev);
+        let (command, bin) = command::build(&start, &private, public)?;
+        let (feed, (sender, replies)) = (Feed::default(), mpsc::channel());
+        let (wired, wiring) = mpsc::channel();
+        let then = command::reach_then(private, install.to_path_buf(), feed.clone(), sender, wired);
+        let stopper = Stopper::new();
+        let (child, stderr) = Process::start(command, bin, &stopper, log, then)?;
+        Ok(Self::made(child, stopper, Wires { wiring, replies, feed }, session, stderr, start))
+    }
+
+    /// A worker around a start; `stderr` relays its lines.
+    fn made(
+        child: Process,
+        stopper: Stopper,
+        wires: Wires,
+        session: u64,
+        stderr: Option<std::io::PipeReader>,
+        start: (PathBuf, PathBuf, bool),
+    ) -> Self {
+        let stderr = match stderr {
+            Some(stderr) => ely_ipc::relay(stderr, "lok-worker"),
+            // A log file has the engine's lines.
+            None => ely_ipc::relay(io::empty(), "lok-worker"),
+        };
+        Self {
+            child,
+            stopper,
+            requests: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            wiring: Some(wires.wiring),
+            replies: wires.replies,
+            feed: wires.feed,
+            down: false,
+            asked: 0,
+            session,
+            stderr,
+            check: Check::Pending(start.1.clone()),
+            author: None,
+            start,
+            probe: crate::Probe::default(),
+            idle: None,
+        }
+    }
+
+    /// The hooked library's BuildId.
+    pub fn build_id(&mut self) -> io::Result<String> {
+        let payload = self.request(tag::BUILD_ID, &[])?;
+        Unpack::new(&payload).str()
+    }
+
+    /// The name new comments and tracked changes carry.
+    pub fn set_author(&mut self, name: &str) -> io::Result<()> {
+        log::info!("lok: the author is set");
+        // Wanted even if this worker fails; a restart sends it.
+        self.author = Some(name.to_string());
+        self.request(tag::SET_AUTHOR, &Pack::new().str(name).bytes())?;
+        Ok(())
+    }
+
+    /// The name last asked for; a restart signs with it.
+    pub fn author(&self) -> Option<&str> {
+        self.author.as_deref()
+    }
+
+    /// Runs a macro by its URL (LOK-11 probe).
+    pub fn run_macro(&mut self, url: &str) -> io::Result<i32> {
+        let payload = self.request(tag::RUN_MACRO, &Pack::new().str(url).bytes())?;
+        Ok(Unpack::new(&payload).u64()? as i32)
+    }
+
+    /// Posts a key press and release (LOK-06).
+    pub fn post_key(&mut self, doc: &Doc, char_code: u32, key_code: i32) -> io::Result<()> {
+        self.request(
+            tag::POST_KEY,
+            &Pack::new()
+                .u64(self.doc_id(doc)?)
+                .i64(char_code as i64)
+                .i64(key_code as i64)
+                .bytes(),
+        )?;
+        Ok(())
+    }
+
+    /// Turns `step` parts, or posts `key` if something is picked.
+    pub fn turn(&mut self, doc: &Doc, step: i32, key: Option<(u32, i32)>) -> io::Result<Option<usize>> {
+        let (char_code, key_code) = key.unwrap_or_default();
+        let doc_id = self.doc_id(doc)?;
+        let payload = Pack::new().u64(doc_id).i64(step.into()).i64(char_code.into()).i64(key_code.into()).bytes();
+        let shown = Unpack::new(&self.request(tag::TURN, &payload)?).i64()?;
+        Ok(usize::try_from(shown).ok())
+    }
+
+    /// Drags a selected object's handle, start then end.
+    pub fn drag_graphic(&mut self, doc: &Doc, from: (i32, i32), to: (i32, i32)) -> io::Result<()> {
+        for (kind, (x, y)) in [(0, from), (1, to)] {
+            let pack = Pack::new()
+                .u64(self.doc_id(doc)?)
+                .i64(kind)
+                .i64(x.into())
+                .i64(y.into());
+            self.request(tag::GRAPHIC, &pack.bytes())?;
+        }
+        Ok(())
+    }
+
+    /// Posts one mouse event in twips (LOK-04).
+    pub fn post_mouse(&mut self, doc: &Doc, event: Mouse) -> io::Result<()> {
+        let pack = [
+            event.kind as i64,
+            event.x as i64,
+            event.y as i64,
+            event.count as i64,
+            event.buttons as i64,
+            event.modifiers as i64,
+        ]
+        .into_iter()
+        .fold(Pack::new().u64(self.doc_id(doc)?), Pack::i64);
+        self.request(tag::POST_MOUSE, &pack.bytes())?;
+        Ok(())
+    }
+
+    /// Updates the IME composition, or commits it (LOK-07).
+    pub fn post_text(&mut self, doc: &Doc, commit: bool, text: &str) -> io::Result<()> {
+        let kind = if commit { 2 } else { 0 };
+        self.request(
+            tag::POST_TEXT,
+            &Pack::new().u64(self.doc_id(doc)?).i64(kind).str(text).bytes(),
+        )?;
+        Ok(())
+    }
+
+    /// Copies the selection; one (mime, bytes) per flavor (LOK-06).
+    pub fn copy(&mut self, doc: &Doc) -> io::Result<Vec<(String, Vec<u8>)>> {
+        let payload = self.request(tag::COPY, &Pack::new().u64(self.doc_id(doc)?).bytes())?;
+        let mut unpack = Unpack::new(&payload);
+        let count = unpack.u64()?;
+        (0..count)
+            .map(|_| Ok((unpack.str()?, unpack.blob()?)))
+            .collect()
+    }
+
+    /// Cuts the selection after a copy went out (LOK-06).
+    pub fn cut(&mut self, doc: &Doc) -> io::Result<()> {
+        self.request(tag::CUT, &Pack::new().u64(self.doc_id(doc)?).bytes())?;
+        Ok(())
+    }
+
+    /// Pastes one flavor into the document (LOK-06).
+    pub fn paste(&mut self, doc: &Doc, mime: &str, data: &[u8]) -> io::Result<()> {
+        self.request(
+            tag::PASTE,
+            &Pack::new().u64(self.doc_id(doc)?).str(mime).blob(data).bytes(),
+        )?;
+        Ok(())
+    }
+
+    /// Runs a table command; the worker confirms it took (LOK-02).
+    pub fn run(&mut self, doc: &Doc, id: &str, values: &[&str]) -> io::Result<()> {
+        self.run_all(doc, &[(id, values)])
+    }
+
+    /// Commands made from one read; the state is checked once.
+    pub fn run_all(&mut self, doc: &Doc, commands: &[(&str, &[&str])]) -> io::Result<()> {
+        let mut addressed = false;
+        for (id, values) in commands {
+            let command = crate::commands::find(id)?;
+            command.args_json(values)?;
+            addressed |= command.addressed(values);
+        }
+        // Numbers hold only in the state they were read.
+        if addressed {
+            self.request(tag::EXPECT, &Pack::new().u64(self.doc_id(doc)?).u64(doc.rev).bytes())?;
+        }
+        for (id, values) in commands {
+            let pack = values.iter().fold(
+                Pack::new().u64(self.doc_id(doc)?).str(id).u64(values.len() as u64),
+                |pack, value| pack.str(value),
+            );
+            self.request(tag::POST_UNO, &pack.bytes())?;
+        }
+        Ok(())
+    }
+
+    /// `doc` as of now: commands by number use this revision.
+    pub fn now(&mut self, doc: &Doc) -> io::Result<Doc> {
+        Ok(Doc { rev: self.state(doc)?.0, ..doc.clone() })
+    }
+
+    /// `doc`'s revision, tile generation, and whether the kernel is blind.
+    pub(crate) fn state(&mut self, doc: &Doc) -> io::Result<(u64, u64, bool)> {
+        let payload = self.request(tag::REVISION, &Pack::new().u64(self.doc_id(doc)?).bytes())?;
+        let mut unpack = Unpack::new(&payload);
+        Ok((unpack.u64()?, unpack.u64()?, unpack.u64()? != 0))
+    }
+
+    /// This worker's session; its documents carry it.
+    pub fn session(&self) -> u64 {
+        self.session
+    }
+
+    /// `doc`'s number here; another worker's document is refused.
+    pub(crate) fn doc_id(&self, doc: &Doc) -> io::Result<u64> {
+        match doc.worker == self.session {
+            true => Ok(doc.id),
+            false => Err(io::Error::new(io::ErrorKind::NotFound, "a document of another lok worker")),
+        }
+    }
+
+    /// The kernel's JSON list for `command`: fonts or styles (LOK-05).
+    pub fn values(&mut self, doc: &Doc, command: &str) -> io::Result<String> {
+        let payload = self.request(tag::VALUES, &Pack::new().u64(self.doc_id(doc)?).str(command).bytes())?;
+        Unpack::new(&payload).str()
+    }
+
+    /// Events past seq `known`, waiting up to `timeout_ms`.
+    pub fn poll_events(&self, doc: &Doc, known: u64, timeout_ms: u64) -> io::Result<Events> {
+        self.feed.wait(doc, known, timeout_ms)
+    }
+
+    /// The pushed events, waited on without this worker's lock.
+    pub fn feed(&self) -> Feed {
+        self.feed.clone()
+    }
+
+    /// A worker whose output failed: stopped, reaped, and why.
+    fn broken(&mut self, request: u8, error: io::Error) -> io::Error {
+        *self.stopper.gate() = true;
+        let status = self.child.end();
+        let said = match (&self.check, self.stderr.said().error) {
+            // The start check adds the last lines.
+            (Check::Checking, _) | (_, None) => String::new(),
+            (_, Some(error)) => format!(": {error}"),
+        };
+        log::error!("lok: the worker failed on request {request} ({status}){said}");
+        io::Error::new(error.kind(), format!("the lok worker failed: {error} ({status}){said}"))
+    }
+
+    /// One round trip per request.
+    pub(crate) fn request(&mut self, request: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
+        // Nothing reaches a worker that has not passed its checks.
+        self.ready()?;
+        self.asked += 1;
+        if let Err(error) = self.wire().and_then(|()| wait::send(&self.requests, request, self.asked, payload)) {
+            return Err(self.broken(request, error));
+        }
+        let (reply, id, body) = match self.replies.recv() {
+            Ok(Ok(frame)) => frame,
+            Ok(Err(error)) => return Err(self.broken(request, error)),
+            Err(_) => return Err(self.broken(request, io::Error::other("the reply reader stopped"))),
+        };
+        if let Err(error) = ipc::check_reply(self.asked, id) {
+            return Err(self.broken(request, error));
+        }
+        match reply {
+            tag::OK => Ok(body),
+            tag::ERR => Err(io::Error::other(Unpack::new(&body).str()?)),
+            other => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown reply {other}"),
+            )),
+        }
+    }
+
+    /// Closes the document in the worker.
+    pub fn close_doc(&mut self, doc: Doc) -> io::Result<()> {
+        self.request(tag::CLOSE_DOC, &Pack::new().u64(self.doc_id(&doc)?).bytes())?;
+        self.feed.closed(doc.id);
+        Ok(())
+    }
+
+    /// Shuts the worker down and reaps it.
+    pub fn shutdown(&mut self) -> io::Result<()> {
+        if self.down {
+            return Ok(());
+        }
+        self.down = true;
+        let mut outcome = self.answer_shutdown();
+        self.child.resolve();
+        if let Process::Adopted(pid, ..) = self.child {
+            if outcome.is_err() {
+                log::warn!("lok: {}", self.child.end());
+            }
+            log::info!("lok: engine {pid} down");
+            return outcome;
+        }
+        let child = self.child.get()?;
+        if outcome.is_err() {
+            let _ = child.kill();
+        }
+        *self.stopper.gate() = true;
+        let status = match child.wait() {
+            Ok(status) => status,
+            Err(error) => {
+                let _ = child.kill();
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("the lok worker could not be reaped: {error}"),
+                ));
+            }
+        };
+        if outcome.is_ok() && !status.success() {
+            outcome = Err(io::Error::other(format!(
+                "the lok worker exited as {status}"
+            )));
+        }
+        if outcome.is_ok() {
+            log::info!("lok: worker down ({status})");
+        }
+        outcome
+    }
+
+    /// The shutdown round trip alone.
+    fn answer_shutdown(&mut self) -> io::Result<()> {
+        self.asked += 1;
+        self.wire()?;
+        wait::send(&self.requests, tag::SHUTDOWN, self.asked, &[])?;
+        let reply = match self.replies.recv() {
+            Ok(Ok(frame)) => frame,
+            Ok(Err(error)) => return Err(self.broken(tag::SHUTDOWN, error)),
+            Err(_) => return Err(self.broken(tag::SHUTDOWN, io::Error::other("the reply reader stopped"))),
+        };
+        ipc::check_reply(self.asked, reply.1)?;
+        match reply {
+            (tag::OK, _, _) => Ok(()),
+            (tag::ERR, _, body) => Err(io::Error::other(Unpack::new(&body).str()?)),
+            other => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("bad shutdown answer: {other:?}"),
+            )),
+        }
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        if let Err(error) = self.shutdown() {
+            log::warn!("lok: shutdown failed: {error}");
+        }
+    }
+}

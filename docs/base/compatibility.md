@@ -1,0 +1,156 @@
+# 兼容清单
+
+随发行说明发布，每个版本一份。支持某格式不等于支持它的全部功能；下表只写已验证的内容、已知限制与保存行为。
+
+<!-- 下两行由 scripts/compatibility.py 写出，勿手改 -->
+版本：Ely Office 0.1.17（首批应用：ElyDoc、ElyTable、ElyShow、ElyPDF、ElyMail、ElyTree、ElyMark）。
+内核：LibreOffice 26.2.6.3（8221e31，加 `patches/libreoffice` 0001–0169，162 个）；MuPDF 1.28.5（8ad45e9，加 `patches/mupdf` 0001–0011，11 个）；Git 2.56.0（a018953）与 git-lfs 3.8.0；gpui-pre 0.3.14（加 `patches/gpui` 0001–0015，15 个）。
+各节内容最近一次逐项核对是在 0.1.11（2026-10-23）；其后各版本的改动只在所涉的条目里更新，未整体重验。
+验证机：macOS 27.0 arm64、Windows 11 x64、Linux（WSL 里的 Ubuntu 26.04 x64）。Linux 的 deb、rpm、Arch 包另在 Debian 11、Ubuntu 26.04、Fedora 44、Arch 容器里装上并核对每个 ELF 的库；发布的二进制要求的 glibc 不高于 2.28（AlmaLinux 8 的构建容器），包的依赖写明这一下限。各应用节的“已验证”在 macOS 上以真窗口核对，其单测在三端都跑。与 Microsoft Office 的交叉核对见下节（网页版，三十份样本，另十八份大、怪、极限的文件）。
+
+## 已知限制
+
+截至 2026-11-19 的主干，未修或未验证的事；各应用一节另有该格式的“限制”。
+
+- 发行：0.1.16 仍按应用出包、各自更新；每个平台一个安装包、整套更新的发布尚未出（Windows 的发布测试待内核重建后再跑，ElyShow 整组测试在 Windows 偶败）。没有 Windows 与 Linux 的 arm64 版，x64 版在 Windows on ARM 上未测。Windows 安装包未签名。WinGet 未收录：七个按应用的旧提交已于 2026-11-19 关闭，统一的 `ZacharyZhang.ElyOffice` 待首个统一发布后再交。
+- 速度：Windows 测试机上与 Office 交替热打开，ElyDoc 打开 big.docx 中位 1.10 秒，Word 1.10 秒，持平而未快过；ElyShow 打开 19 MB 的演示稿中位 1.58 秒，PowerPoint 1.09 秒。装完与重启后的首开待重量。0.1.16 在 Windows 虚拟机上的基准里，ElyPDF 首次启动一次 10.9 秒（其后重测 3.4 至 3.6 秒，与别的应用相同），ElyMail 在搜索框连打时主线程六次忙 134 至 511 毫秒；两处都未复现，原因未明。
+- ElyShow：Windows 上微软雅黑粗体的个别字（如“施”）显得偏细，已修一个原因，未在中文界面上复核。拖动对象时 Ely 画的移动框与吸附要内核补丁 0140，Windows、macOS 上未实测。负载下加动画偶被内核拒绝，原因未明（被拒时日志写明预设与时长）。用户报的放映中丢方向键、换版式后的“灰色箭头”都未复现。
+- ElyMark：HTML 照浏览器（Chromium 的 innerText）的读法，只有几处不同：Markdown 段落里的连续空格照写的画，浏览器并成一个（`a <span></span> c` 画出两个空格）；`select` 里的文字照画，分行与浏览器不同；`<dialog open>` 前的空格不留；`hidden="until-found"` 照 `hidden` 隐去。
+- ElyTree：Shell 文件的差异照 Bash 的词法判注释，个别写法与 Bash 不同（`"${x:-'…'}"` 里的反斜杠、`${x:-…}` 在双引号里的反斜杠、数组下标里的引号）。
+- 无障碍：屏幕阅读器在 ElyTable 与 ElyShow 只读到当前段落（ElyDoc 读全文）；组件库与 gpui 在角色、禁用状态与内部文案上的缺口见 `docs/accessibility.md` 的“上游待办”。
+
+## 与 Microsoft Office 的交叉核对（网页版）
+
+2026-11-10，Ely Office 0.1.15 的内核（补丁至 0110）。三十份由 Ely 内核打开后存出的文件，传到 OneDrive，逐个在 Word、Excel、PowerPoint 网页版里打开：
+
+| 类型 | 份数 | 报“需要修复”或打不开 | 以编辑模式打开 |
+| --- | --- | --- | --- |
+| DOCX | 10 | 0 | 10 |
+| XLSX | 10 | 0 | 10 |
+| PPTX | 10 | 0 | 10 |
+
+- 样本（`tests/office/web_samples.py` 写出，再经 `cargo build -p ely-lok --example resave` 的 `resave` 以内核另存）：
+  - DOCX：word（公式）、redline（修订）、equation、toc、toc-shape（目录）、t、backslash（腾讯文档的反斜杠条目）、rich（目录、域、批注、插入与删除的修订）、pages（30 页，每 5 页一张表、每 10 页一张图）、big（100 页，7 MB）。
+  - XLSX：kept（未知函数的结果）、pivot、pivot-values（透视表）、spill（动态数组）、links（超链接，两张中文名的表）、booleans、date1904、t、rich（2000 行、折线图、跨表公式）、workbook（三张表，数组公式、定义名称、`SUMIFS`、`INDEX`/`MATCH`）。
+  - PPTX：t、sections、sections-utf16（章节，Ely 存出后章节不在，见 ElyShow 一节）、video、trouble 与 pair（由平面 ODF 写成：形状、文字、连线）、deck1、deck3、rich（带点击淡入的动画）、big（45 张，18 MB）。
+- 判据：页面标题是该文件，编辑器已载入（功能区、工作表标签或幻灯片窗格都在），顶部是“已保存”，没有修复、损坏或只读的对话框与横幅。big.pptx 另截屏看过：45 张幻灯片都有缩略图。
+- 没核对的：内容逐项是否与 Ely 所见相同（版式、字体、公式结果、动画），桌面版 Office，以及网页版不支持而静默略过的内容。这一节只回答“Office 认不认这份文件”。
+- 重做：`python3 tests/office/web_samples.py target/debug/examples/resave <文件夹>`（先设 `ELY_LOK_WORKER`），把文件夹里的三十份传上 OneDrive，逐个打开。上传与打开是人工或浏览器自动化做的，不在库里的脚本中。
+
+### 大、怪、极限的文件
+
+2026-11-11，内核补丁至 0124。十六份文件由 Ely 内核打开、改一处（文字文档插一个分页符，表格写一个单元格，演示稿插一张幻灯片）、照 Ely 的保存存出，另两份是 Word 自己加密的原件，传到 OneDrive，逐个在网页版打开：
+
+| 文件 | 内容 | 网页版 |
+| --- | --- | --- |
+| bigtable.docx | 400 行的表，每行一张图，22.5 MB | 编辑模式，图文都在 |
+| pages300.docx | 300 页，每 5 页一张表、每 10 页一张图 | 编辑模式 |
+| nested.docx | 表套表 12 层，九级编号列表（`numbering.xml`） | 编辑模式，3 页 |
+| rich.docx | 目录、域、批注、插入与删除的修订 | 编辑模式 |
+| equation.docx | 公式 | 编辑模式 |
+| huge.xlsx | 10 万行，公式、定义名称、图表 | 编辑模式，公式有值 |
+| wide.xlsx | 1000 行 × 1000 列，每行末一个求和，中文表名 | 编辑模式 |
+| pivot.xlsx、spill.xlsx | 透视表、动态数组 | 编辑模式，透视表可用 |
+| kept-more.xlsx | 未知函数（测试用的假函数） | 编辑模式；Excel 重算后为 `#NAME?`，Ely 存的是原公式 |
+| slides207.pptx | 207 张，每张一张图，98.7 MB | 编辑模式，208 张 |
+| nested.pptx | 组合套组合 10 层 | 编辑模式，最里层的文字在 |
+| rich.pptx | 动画，37 张 | 编辑模式 |
+| video.pptx | 视频 | 编辑模式，视频可播 |
+| locked.docx、locked.pptx | 加密件（密码 ely），Ely 存出 | 问密码后打开，只读（网页版对加密件都如此） |
+| original-locked.docx、original-locked.pptx | Word 加密的原件 | 同上 |
+
+- 结果：18 份全部打开，0 份报修复或损坏。加密件在网页版只能读，Word 自己的加密件也一样。
+- 查出并修了一处：打开时输过密码的文件，Ely 保存后不再加密（内核的保存不带密码）。现在 worker 记下打开时的密码，保存与另存为照用；含内核保存会先行取走的字样（`,Watermark=`、`,FullSheetPreview=`、`,Password=` 与其结尾词）的密码，载入前即拒，提示换个密码，不会存成无密码或密码被改的文件；测试 `a_locked_document_stays_locked_when_saved`（DOCX、PPTX、ODT，改前 DOCX 即败）。
+- 未修：加密的 PPTX 存出后没有章节（内核不保留章节，见 ElyShow 一节；应用里加密的 PPTX 只写副本，不覆盖原件）。
+- 重做：`python3 tests/office/web_extreme.py target/debug/examples/resave <文件夹>`，其余同上。
+
+## 往返验证
+
+每份样本在 Ely 中打开、编辑、保存、关闭、再打开、再编辑、再保存，最后由不经 LibreOffice 或 MuPDF 的读取器检查。办公文件交 `tests/scripts/ooxml.py`（自己解 OOXML，预期值由它自己算），DOCX 在 macOS 上另交 `textutil` 读；用例在 `crates/ely-lok/src/client/tests/independent.rs`。PDF 在 macOS 上交 PDFKit 读，在 Windows 与 Linux 上交 lopdf 读；用例在 `crates/ely-pdf-worker/tests/independent.rs`。
+
+| 用例 | 检查 | macOS | Windows | Linux |
+| --- | --- | --- | --- | --- |
+| DOCX 合同 | 两次会话键入的文字（含中文）、批注、修订记录的插入、修订开关保留 | 通过（另经 `textutil`） | 通过 | 通过 |
+| XLSX 公式 | 公式文本与缓存结果：整数、日期序号、`#DIV/0!` 错误值、文本严格相等，浮点按用例声明的 1e-12 容差；第二次会话的公式 | 通过 | 通过 | 通过 |
+| PPTX 演示 | 三张幻灯片、隐藏的那张仍隐藏、备注文字（含中文） | 通过 | 通过 | 通过 |
+| PDF 编辑 | 第一次会话改文字、加字段，重开后填该字段、移页：文字、字段值、页序；子集字体里改的文字，重开后加页 | 通过（PDFKit） | 通过（lopdf） | 通过（lopdf） |
+
+打印：纸张取文档的，按原大印。打印机没有该纸张、或页面放不下所选纸张时报错，不裁切。
+
+| 平台 | 路径 | 核对 |
+| --- | --- | --- |
+| macOS | PDFKit 的打印面板 | 真窗口 |
+| Windows | 系统打印对话框 | 真窗口，打印到 Microsoft Print to PDF |
+| Linux | 桌面门户；由 Ely 照对话框的选择排页（页码范围、奇偶页、倒序、份数与逐份、缩放、每张页数），只交出 PDF | 只对替身门户核对；GNOME、KDE 真桌面未核对 |
+
+字体：缺失字体由内核报出，ElyDoc 页面上方列出缺失的字体（`doc.fonts.missing`），分页可能与有字体时不同。两种环境对照（`a_missing_font_is_named_and_its_pages_counted_apart`，Windows）：同一份 400 段的 FODT，字体为随包的 DejaVu Sans Mono 时 17 页、不报缺失；换成不存在的 Nowhere Mono 时内核以别的字体代替，9 页，缺失列表恰为 Nowhere Mono。字体按它在任一语言里的家族名找到（补丁 0124）：文档写“思源宋体”、本机装的是 Source Han Serif SC，即用它，不报缺失；三端照同一张名字表（字体的 name 表，家族名与印刷家族名），测试 `a_font_is_found_by_its_name_in_another_language`（Linux 用随测试的双语字体，macOS 用苹方，Windows 用 Malgun Gothic）。替换规则可见：提示逐个写出缺失的字体与实际所用的字体（“Nowhere Sans（以 Liberation Sans 代替）”），内核随缺失列表报出所用的家族（补丁 0128）。产品不带微软字体。
+
+Aptos 与 Aptos Display 缺失时依次以随内核附带的 Source Sans 3、Carlito、Liberation Sans 代替（Source Sans 3 实测宽度为 Aptos Regular 的 0.978），Arial Nova 按同属 Arial 系以 Liberation Sans 代替、未测宽度；内核补丁 0149 加替换项，Linux 的 `ely-fonts.conf` 加同样别名，测试 `missing_office_fonts_draw_as_a_sans_of_like_width` 在三端都跑。
+
+## ElyDoc
+
+| | 格式 |
+| --- | --- |
+| 编辑与保存 | DOCX、ODT（保存保留原格式；另存为默认 DOCX） |
+| 导入或受限 | DOC、RTF 按原格式保存；含宏的文件（docm、dotm、带 Basic 的 ODF/OLE）进风险模式，只能另存副本，宏不运行 |
+| 输出 | PDF（页码范围、批注、修订标记）、打印 |
+
+已验证：文字与段落格式、样式、页面与分节、页眉页脚、表格、图片锚点与环绕、目录、脚注尾注、书签、交叉引用、题注、公式（含 Word 的 EQ 域，转为公式对象）、批注与回复、修订、查找替换、拼写（英文）、比较、邮件合并。限制：交叉引用只指向书签；公式导出 DOCX 后在 Word 中是否可编辑未验证。
+
+## ElyTable
+
+| | 格式 |
+| --- | --- |
+| 编辑与保存 | XLSX、ODS（保存保留 xlsx、ods、xls、fods；另存为默认 XLSX） |
+| 导入或受限 | XLS；CSV、TSV、TXT 经导入对话框（编码、分隔符、引号、逐列类型）成为新工作簿，原文件不动；xlsm、xltm 进风险模式 |
+| 输出 | PDF（全部工作表，按页面设置）、CSV 与 TSV（当前工作表的显示值，UTF-8）、打印 |
+
+公式语法为 Excel A1。XLSX 与非 LibreOffice 生成的 ODF 载入时总是重算。不支持的函数（XLSX、ODS；直接写的或经定义名称；数值、布尔、文字含空串、数组）显示文件里存的结果，复制工作表与撤销照旧，保存照写，原公式照原拼写保留，横幅列出这些单元格；其输入一改即显示 `#NAME?`（`INDIRECT`、`OFFSET` 等易变函数的输入无从得知，载入后任何改动都算）。限制：XLS 的导入未作此处理；外部链接不刷新，显示保存时的值；1904 日期系统（XLSX 的 `date1904`）读入、键入日期与另存 XLSX、ODS 后序列号照旧。外部三维区域（`'…/[源.xlsx]S1:S3'!A1`，直接写或经 `INDIRECT`）在 SUM、SUMSQ、PRODUCT、AVERAGE、COUNT、COUNTA 里逐表读，别的函数报 `Err:502`；范围随首末两表的名字，源里插表、调换后更新照新位置读；更新时它跨到的任一张表不在即失败、点名、留旧值；末表不在源里即 `#REF!`；存 XLSX 写成 Excel 的 `'[1]S1:S3'!A1` 并带各表的缓存；XLSX 重开后经 `INDIRECT` 的在用户更新链接前显示 `Err:540`（补丁 0141；Windows、macOS 待 R20.26）。限制：存为 ODS 再开，直接写的外部三维区域显示 `#REF!`，更新链接后仍是（R20.33 余项）。
+
+## ElyShow
+
+| | 格式 |
+| --- | --- |
+| 编辑与保存 | PPTX、ODP（另存为默认 PPTX） |
+| 导入或受限 | PPT；章节（`p14:sectionLst`）内核不保留：带章节的 PPTX 打开即提示，保存只写副本，原文件的章节不动；加密的 PPTX 看不到有无章节，同样只写副本；媒体默认嵌入 |
+| 输出 | PDF（幻灯片或讲义 1、2、3、4、6、9 张一页）、PNG（每张 1920 宽）、打印 |
+
+中文与西文、数字之间：PPTX、PPT 照 PowerPoint 不加空隙，后加的文本框也一样（补丁 0125）；ODP 照 LibreOffice 加四分之一字宽。
+
+限制：Ely 提供一组基础切换与动画，文件自带的其他效果照原样保留并显示内核名称；批注不做回复（Impress 无回复结构）；媒体由系统播放：macOS 以 AVFoundation，Windows 以 Media Foundation，Linux 以系统的 GStreamer 1.x（不随包；要 gst-plugins-base，MP4 要 gst-plugins-good，H.264、AAC 要 gst-libav），缺了时媒体对象报出 GStreamer 给的原因。
+
+## ElyPDF
+
+| | 范围 |
+| --- | --- |
+| 编辑与保存 | 页面增删移转裁剪、文字与图片改动、批注、表单字段（文本、复选、单选、选择框）、书签、链接、属性、附件、OCR 文字层、内容删除与清理、密码与权限、数字签名 |
+| 导入或受限 | XFA 表单不支持；已签名文件另存为未签名副本；修复过的文件只能另存；多选列表框按单选填写 |
+| 输出 | PDF、页面图片（PNG 72/150/300 dpi）、文本、优化的 PDF、打印 |
+
+保存经 MuPDF 写快照后紧缩写出；签名经增量更新写出并重开核对摘要。独立阅读器读回页序、改动的文字与字段值（见上“往返验证”）。证书信任照各端系统：macOS 的 SecTrust、Windows 的 CryptoAPI 链引擎、Linux 的系统 CA（webpki；签名者本身是根或是 CA 时照基本 X.509 规则：有效期、签名、上级为 CA、路径长度、签发用途，有名称约束、读不出的扩展或未执行的关键扩展即不受信，路径长度不计自颁发的换钥证书（名字照 RFC 5280 比较；Windows 逐字节比，名字换了编码的换钥证书在 Windows 上不受信））。限制：证书吊销状态不核验，不联网。
+
+## ElyTree
+
+标准本地 Git 仓库，随包 Git 2.56.0。浅克隆、LFS（只显示状态，不下载对象）、子模块（显示状态与检出记录的提交）照 Git 的限制显示。Ely 写的一切都是 Git 原生提交与引用；不提供交互式变基与硬重置。
+
+## ElyMark
+
+| | 格式 |
+| --- | --- |
+| 编辑与保存 | MD、Markdown（UTF-8，带不带 BOM；保留换行风格；文本即原文，只写回所改的字） |
+| 导入或受限 | UTF-16 与非 UTF-8 拒绝打开并指出字节位置；Markdown 读法（0.1.11 时为 markdown-rs，今为 pulldown-cmark）不认的语法照原文显示；超过 2 MiB 只以源码打开 |
+| 公式 | `$…$`、`$$…$$` 与 `\(…\)`、`\[…\]`，经 RaTeX 排版（行内与块） |
+| 输出 | HTML（自包含或带资源文件夹）、PDF、纯文本、富文本复制、打印 |
+
+## ElyMail
+
+| | 格式 |
+| --- | --- |
+| 协议 | IMAP4rev1（有 UIDPLUS、MOVE、SPECIAL-USE、LIST-EXTENDED 即用）、POP3、SMTP（8BITMIME、SMTPUTF8、SIZE）；Microsoft 走 OAuth，Gmail 与 iCloud 走应用专用密码；随系统代理（HTTP CONNECT、SOCKS5，不支持 PAC） |
+| 读 | MIME（嵌套至多 64 层）；纯文本与 HTML 按块的安全子集画出，CSS 不读，SVG 图片不显示；`.eml` 只读查看 |
+| 导入或受限 | MBOX（mboxrd）导入为本机文件夹，只在本机；vCard 2.1、3.0、4.0（UTF-8）；只报 IMAP4rev2 的服务器读不通 |
+| 输出 | 写信发纯文本，或纯文本加 HTML；MBOX（mboxrd，只写完整的邮件：缺附件、原始二进制、末尾无换行的不导出）、EML、vCard 3.0 |
+
+## 第二批
+
+ElyAgent 不在首批，验证随第二批补上。

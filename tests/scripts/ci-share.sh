@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# ci.sh uses shared engines only through links to them.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+share=$work/share
+mkdir -p "$share/engines" "$share/reference" "$share/engines"$'\n' "$share/reference"$'\n' "$work/elsewhere"
+# Intel Macs check for the pinned OpenSSL.
+mkdir -p "$share/engines/openssl/lib/pkgconfig"
+: >"$share/engines/openssl/lib/pkgconfig/libcrypto.pc"
+version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
+# pr.yml passed; ci-upload.sh tests the gates.
+mkdir -p "$work/bin"
+printf '#!/usr/bin/env bash\necho "{\\"total_count\\": 1}"\n' >"$work/bin/curl"
+chmod +x "$work/bin/curl"
+# The release check wants huacnlee/cargo; ci-upload.sh tests it.
+printf '#!/usr/bin/env bash\necho "cargo 1.101.0 (huacnlee/cargo 0.102.0-9)"\n' >"$work/bin/cargo"
+chmod +x "$work/bin/cargo"
+# A macOS clone whose packaging stub stops before any upload.
+attempt() { # name, setup; sets status, writes the output
+  local clone=$work/$1
+  mkdir -p "$clone/scripts" "$clone/packaging/macos"
+  cp "$root/scripts/ci.sh" "$clone/scripts/"
+  mkdir -p "$clone/tests/perf"
+  : | tee "$clone/scripts/compatibility.py" "$clone/scripts/release-gate.py" >"$clone/tests/perf/baseline.py"
+  git -C "$clone" init -q
+  git -C "$clone" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m t
+  printf '#!/usr/bin/env bash\necho "packaging reached"\nexit 1\n' >"$clone/packaging/macos/release.sh"
+  chmod +x "$clone/packaging/macos/release.sh"
+  cp "$root/Cargo.toml" "$root/rust-toolchain.toml" "$clone/"
+  cp "$root/packaging/apps.tsv" "$clone/packaging/"
+  mkdir -p "$clone/tests/scripts"
+  printf '#!/usr/bin/env bash\n' | tee "$clone/tests/scripts/engine-arch.sh" "$clone/scripts/mac-ready.sh" >"$clone/scripts/release-tests.sh"
+  chmod +x "$clone/tests/scripts/engine-arch.sh" "$clone/scripts/release-tests.sh" "$clone/scripts/mac-ready.sh"
+  # lo-series.sh tests the check itself; here only its call.
+  printf '#!/usr/bin/env bash\necho "series check $*"\n[ ! -e "%s/series-lags" ]\n' "$work" >"$clone/scripts/apply-lo-patches.sh"
+  chmod +x "$clone/scripts/apply-lo-patches.sh"
+  (cd "$clone" && eval "$2")
+  status=0
+  PATH=$work/bin:$PATH ELY_SHARE=$share ELY_RELEASE_TOKEN=unused ELY_MICROSOFT_CLIENT_ID=unused ELY_UPDATE_KEY=unused ELY_SIGN_IDENTITY=unused ELY_NOTARY_PROFILE=unused ELY_INSTALLER_IDENTITY=unused \
+    "$clone/scripts/ci.sh" macos "v$version" >"$work/$1.out" 2>&1 ||
+    status=$?
+}
+# The target as stored plus a newline and x.
+target() { readlink "$1" && printf x; }
+passes() { # name, setup; reaches the release step
+  attempt "$1" "$2"
+  grep -q 'packaging reached' "$work/$1.out" || fail "$1 was refused: $(cat "$work/$1.out")"
+  grep -qx 'series check --check engines/lo-src' "$work/$1.out" || fail "$1 never checked the patch series"
+  for part in engines reference; do
+    [ "$(target "$work/$1/$part")" = "$share/$part"$'\n'x ] || fail "$1 has no $part link to $share/$part"
+  done
+}
+refused() { # name, setup; stopped before the release step
+  attempt "$1" "$2"
+  [ "$status" -ne 0 ] || fail "$1 exited 0"
+  grep -q 'is not a link to' "$work/$1.out" || fail "$1 was let through: $(cat "$work/$1.out")"
+  ! grep -q 'packaging reached' "$work/$1.out" || fail "$1 reached the release step"
+}
+passes absent ':'
+passes linked 'ln -s "$share/engines" engines && ln -s "$share/reference" reference'
+for part in engines reference; do
+  refused "built-$part" "mkdir $part"
+  refused "elsewhere-$part" "ln -s \"\$work/elsewhere\" $part"
+  refused "newline-$part" "ln -s \"\$share/$part\"\$'\\n' $part"
+  refused "dangling-$part" "ln -s \"\$work/gone\" $part"
+done
+# An engine lagging the series stops the release.
+: >"$work/series-lags"
+attempt lagging ':'
+[ "$status" -ne 0 ] || fail "a lagging engine exited 0"
+! grep -q 'packaging reached' "$work/lagging.out" || fail "a lagging engine reached the release step"
+grep -q 'series check --check engines/lo-src' "$work/lagging.out" || fail "the lagging engine was not stopped by the series check"
+echo "ci-share: links pass; own builds, other and newline targets refused; a lagging series stops it"

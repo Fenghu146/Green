@@ -1,0 +1,90 @@
+# 无障碍与国际化复核
+
+首批七个应用。Windows 11 与 Linux（AT-SPI）于 2026-10-27 复核七个（R14.8）；macOS 27 于 2026-10-30 复核七个（R14.53，含 ElyMail；2026-10-08 那次只六个）。每条写依据；做不到或未验证的写明。
+
+## 键盘
+
+| 要求 | 依据 | 缺口 |
+| --- | --- | --- |
+| 键盘完成打开、编辑、保存、搜索与主要工具 | 共用命令（`ely_ui::commands`：新建、打开、保存、另存为、导出、打印、关闭标签 Cmd+W、命令面板、设置），各应用的查找（Cmd+F）与模式键；`shell.sh`、`doc-shell.sh` 以按键驱动；ElyMark 的块以 Enter、空格打开，由组件库的 gpui 窗口测试覆盖；查找与编辑工具随 C14.9 原生重做 | ElyDoc 的图片裁剪只能拖手柄（宽高有属性栏的输入框，`props/object.rs`；ElyShow 的对象有位置与大小的输入框；透视表字段以下拉框放置，`analysis/dialogs.rs`）；ElyPDF 页面上的工具都只认指针（`pages.rs` 只把左键的按下、移动、松开交给它们）：选字与文字标记、在页面上填表单字段（勾选、单选、填文字与选项）与跟随链接（`annotate.rs` 的 `click`）、编辑与添加文字、注释、图章、方框、圆、线、手绘、表单字段、链接、签名、放置签名、区域标记 |
+| 焦点框不依赖悬停 | 组件库可按元素都是 Tab 停靠点并带 `focus_ring`（bc6f1c2 起 git 行带透明边框使焦点框可见） | — |
+| 内容区与界面间焦点可预测 | Tab 顺序导航→内容→属性→状态（C05.4，`shell.sh`）；浮层关闭后焦点回到打开前之处（组件库 38deadd、e21336f）；文档（LOK 视图）把 Tab 留给自己（制表符、跳单元格、缩进），F6 与 Shift+F6 照 Tab 的次序移出与移回（组件库 029632b；原先没有键盘出口）；ElyPDF 的页面是 Tab 停靠点（原先离开后 Tab 回不去）；`windows-names.sh`、`linux-names.sh`、`macos-names.sh` 在七个应用（含 ElyMark）里走完 Tab 一圈，每个文档都走得到、F6 都出得去（三端都到页面即按 F6，焦点须出页面，F6 的落点也核名字）；ElyMark 的文档每块是一个停靠点，F6 原先只在块间走，组件库 63543a0 起直接出文档；Windows 上在别的窗口之后打开、再点到前面的窗口，焦点照报给辅助技术（gpui-pre-windows 的 `a11y_init` 改读 `GetActiveWindow`，原先读前台窗口，读屏听不到 Tab） | — |
+| 对比度 4.5:1 | 主题与 Omarchy 色板按组件库 `A11yChecker` 规则收口（正文、状态色 4.5:1，焦点与图表色 3:1），核对不过的主题整套不用（C05.1） | 文档内容的颜色取自文件，照原样显示 |
+
+## 辅助技术
+
+| 要求 | 依据 | 缺口 |
+| --- | --- | --- |
+| 控件有角色与名称 | 组件库核心控件、对话框、列表、树、提交与差异行、设置行（组与说明）、提示（Toast 有角色与名称）；真窗口测试都经 AX 树操作（`ax-values`、`ax-press`）；图标按钮的名字只取提示文字，不再以图标编号（x、zoom-out）充数（组件库 76047a6，六种语言）；文档视图名为“文档”“电子表格”“演示文稿”“PDF 文档”；属性栏与对话框的数字框、下拉框取其行的标签；`windows-names.sh`（UI Automation）与 `linux-names.sh`（AT-SPI）核对七个应用每个可操作节点与每个 Tab 停靠点都有名字，`macos-names.sh`（AX，VoiceOver 所读）在 macOS 上同；macOS 上辅助技术问焦点原先总得到窗口（gpui-pre-macos 把 AccessKit 挂在内容视图上，第一响应者却是其中的 gpui 视图），改挂到 gpui 视图 | `lists::Outline` 无角色（上游待办；`feedback::Alert` 已有，组件库 105bf94）；gpui 无 aria-disabled，以说明文字表达 |
+| 文档内容可达 | LOK 视图以 `MultilineTextInput` 交给 AX：ElyDoc 交出正文的全部段落，一段一个文本串，插入点与选区落在光标所在的那段（R18.7，内核补丁 0105 的 `.uno:ElyReading`；光标在脚注、页眉、文本框或形状里时只交当前段落）；Calc 交当前单元格与输入行，Impress 交当前段落（R14.7；读屏连上时不再向表格与演示要正文，原先每次都记一条错误）；ElyPDF 以 `Document` 交出所显示页面的逐行文字与拖选的选区；`windows-a11y.sh` 经 UI Automation 的 TextPattern（NVDA 所读）读到段落、插入点、跨 emoji 的选区与 PDF 的页文与选区 | Orca 51.1 实测（`linux-a11y.sh`，R18.7）：方向键到哪行读哪行，“全文朗读”从插入点所在的句子读到文末，中文句号也断句（AT-SPI 桥原先不答“句”的查询，`vendor/accesskit_atspi_common` 补上）；NVDA 的连读未测：Windows 的内核须先带补丁 0105 重建；正文很长时每帧要重交全部段落，5000 段（1.3 MB）在调试构建里每帧约 25 毫秒，内核读一次约 70 毫秒，只在辅助技术连着时发生；表格与演示仍只到当前单元格、当前段落；VoiceOver 朗读不测（用户定）；AT-SPI 的树、名字与焦点（`linux-names.sh`）已实测；ElyMark 的节点与名字由三端 names 走查核对，块的文字经辅助技术读出未核对（须真窗口） |
+| 编辑状态可达 | 保存状态以状态栏文字表达；风险、链接与保持的结果是可点的状态栏项，有角色与名字，菜单里各有同一动作（`ShowRisk`、`UpdateLinks`、`ListKept`、`ShowRepairReport`），键盘由菜单到达；引擎停止是页面位置的错误页（`office-stopped`，`feedback::ErrorView`） | 状态栏文字是否进 AX 树未核对（须真窗口）：无风险时保存状态是不可点的 `StatusBarItem` 标签（`ely_office::Chrome::state_item`），组件库的 `shell::StatusBar` 只给可点的项角色与名字；锁定的组件库里可点的项不是 Tab 停靠点，组件库 main 已改，换 pin 归 SF.25 |
+
+## 国际化
+
+| 要求 | 依据 | 缺口 |
+| --- | --- | --- |
+| 简中与英文界面 | `ely_ui::i18n` 缺键即失败；组件库面板族、对话框、批注栏等内建中英目录；设置可切语言（下次启动生效） | 内核给出的固定文字由 Ely 重写：ElyTable 的状态、错误与单元格样式，ElyDoc 的内置样式名与纸张名（R14.6，`chinese.rs` 在中文下画出排序、筛选与属性栏，无英文）；文件与主题自带的名字照原样 |
+| 西班牙语界面 | 系统的 es-*（`es_PE.UTF-8`、`es-419`）归到 es-ES，设置可选 Español；八个应用与组件文案已译，缺键即失败（`spanish_tests.rs`；R15.16）；内置样式名与纸张名照 LibreOffice 的 es 译文（`builtin.rs`） | 拼写词典只随英文 |
+| 日语界面 | 系统的 ja-*（`ja_JP.UTF-8`、`ja_JP.eucJP`）归到 ja-JP，设置可选“日本語”；八个应用的文案已译，缺键即失败（`japanese_tests.rs`）；内核给出的固定文字照 LibreOffice 26.2.6.3 的 ja 译文（`builtin.rs`、`ja/calc.rs`） | 日文输入法未实机核对；拼写词典只随英文 |
+| 韩语界面 | 系统的 ko-*（`ko_KR.UTF-8`、`ko_KR.eucKR`）归到 ko-KR，设置可选 한국어；七个有界面的应用与组件文案已译，缺键即失败（`korean_tests.rs`）；内置样式名照 LibreOffice 的 ko 译文，ko 未译的自拟（`builtin.rs`） | 未经韩语母语者审读；拼写词典只随英文 |
+| 越南语界面 | 系统的 vi-*（`vi_VN.UTF-8`）归到 vi-VN，设置可选 Tiếng Việt；八个应用与组件文案已译，缺键即失败（`vietnamese_tests.rs`）；内核文字照 LibreOffice 26.2.6.3 的 vi 译文（`builtin.rs`、`figures.rs`），vi 未译的自拟 | 拼写词典只随英文；Windows-1258 的 CSV 导入后声调为组合字符，内核不合成 |
+| 法语界面 | 系统的 fr-*（`fr_CA.UTF-8`、`fr-BE`）归到 fr-FR，设置可选 Français；八个应用的目录全译，缺键即失败（`french_tests.rs`）；内核固定文字照 LibreOffice 的 fr 译文（`builtin.rs`、`fr/calc.rs`） | 拼写词典只随英文 |
+| 德语界面 | 系统的 de-*（`de_AT.UTF-8`、`de-CH`）归到 de-DE，设置可选 Deutsch；八个应用的目录全译，缺键即失败（`german_tests.rs`）；内核固定文字照 LibreOffice 的 de 译文（`builtin.rs`、`de/calc.rs`） | 拼写词典只随英文 |
+| 中英文输入、组合输入、标点 | LOK 视图与 ElyMark 的编辑器都经输入法回调处理组字（`lokview.sh` 组“你好”；组件库的文档测试）；往返用例含中文（`independent.rs`） | 系统拼音输入法实机只做过人工检查，测试以输入法回调模拟 |
+| 混合字体 | 内核按字体回退排版；缺失字体在 ElyDoc 页面上方列出；有、无字体两种环境的分页对照见 `docs/compatibility.md`（C19.1） | 提示不说换成哪种字体：LOK 只报缺失的名字 |
+| 非 ASCII 路径 | `paths_keep_spaces_cjk_and_case`（保存）；启动参数按当前目录取绝对路径（C20.1 修） | — |
+| 日期、数字、纸张用显式区域 | 内核载入选项固定 `Language=en-US`（`ely-lok/src/worker.rs` 的 `LOAD_OPTIONS`），公式为 Excel A1 语法；纸张取自文档本身并原样打印（C19.2） | — |
+| 改界面语言不重解释已存数值 | 同上：内核的数字区域不随界面语言，界面语言只改 Ely 的文案与选区统计的名称 | — |
+
+## 译文校对
+
+六种新语言（de、es、fr、ja、ko、vi）没有母语者校对的记录，设置里各标“预览”，语言一行的说明写明此事；英文与简体中文不标。有母语者校对后，在下表记下校对人、日期与范围，再从 `settings/picks.rs` 的 `PREVIEW` 里去掉该语言。
+
+| 语言 | 母语者校对 | 机器核对（2026-11-10，R18.6） |
+| --- | --- | --- |
+| de | 无 | 与 LibreOffice 共有的短标签 536 条：479 条同其译文，57 条不同 |
+| es | 无 | 476 条同，60 条不同 |
+| fr | 无 | 468 条同，68 条不同 |
+| ja | 无 | 440 条同，96 条不同 |
+| ko | 无 | 418 条同，96 条不同 |
+| vi | 无 | 292 条同，207 条不同（LibreOffice 的 vi 译文不全，且用旧式拼写 `Xoá`） |
+
+机器核对的做法与所见：
+
+- 对照：取 LibreOffice 26.2.6.3 各语言的界面译文（`officecfg/…/UI.po`），凡 Ely 的英文标签与其 `msgid` 相同（去掉快捷键记号与省略号、不超过四个词）的，比两边的译文。不同的各条里，保存、另存为、导出、删除、撤销、重做、取消、发送一类会动数据的命令逐条看过：都是同义的不同写法（如 fr `Supprimer la ligne` 与 `Supprimer ligne`，ko `실행 취소` 与 `실행취소`），没有把一个命令译成另一个命令的。
+- 相混：英文分开的十三个命令（Save、Save As…、Save a Copy…、Export…、Don't Save、Discard、Delete、Undo、Redo、Send、Keep Mine、Reload from Disk、Rename），每种语言里译文两两不同。
+- 不一：同一个命令在不同应用里应是同一个词。查出五处并改一：ja 的“剪切”在 ElyMark 为 `カット`、别处为 `切り取り`；ko 的“剪切”“粘贴”在 ElyMark 为 `오려두기`、`붙이기`，别处为 `잘라내기`、`붙여넣기`；ja、ko 的“重命名”各有两种写法。都取 LibreOffice 与本项目别处所用的那个。
+- 两条规则由 `i18n/wording_tests.rs` 守住（七种非英文目录都查）：改回任一处即败。
+- 机器核对查不出语气、搭配与整句是否自然，这要母语者。
+
+### 整句提示的对照（R18.6 第 2 轮）
+
+上面的对照只比短标签。动手前先问一句的提示——删除、丢弃、覆盖、不可撤销——是整句，另列于此。取 LibreOffice 26.2.6.3 译文库的 sfx2、sc、sd、sw、svx、svtools、uui、fpicker、vcl、cui 十个模块（各语言的 `messages.po`），按英文找意思相当的句子；找得到的逐语言并排看关键词，找不到的记“无对应项”，未对照。
+
+有对应句的十条：
+
+| Ely 的键 | LibreOffice 的句子 | de | es | fr | ja | ko | vi |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `office.unsaved.title` | sfx2 `Save changes to document “$(DOC)” before closing?` | 同：`Änderungen … speichern?` | 同：`guardar los cambios` | 同：`Enregistrer les modifications` | 同：`への変更を保存しますか` | 同义：Ely `변경 사항을 저장하시겠습니까`，其 `변경 내용을 저장하겠습니까` | 其无译文 |
+| `office.unsaved.detail` | sfx2 `Your changes will be lost if you don’t save them.` | 同：`Änderungen gehen … verloren` | 同：`perder … los cambios` | 同：`perdre … les modifications` | 同：`変更…は失われます` | 同：`변경 사항이 사라집니다` | 其无译文 |
+| `table.merge.title` | sc `Merge Cells`、`Some cells are not empty.` | 同：`Zellen … verbinden` | 同：`Combinar celdas` | 同：`Fusionner … cellules` | 同：`セルを結合` | 同：`셀 … 병합` | 同：`Gộp … ô` |
+| `table.merge.detail`、`table.merge.move` | sc `Move the contents of the hidden cells into the first cell` | 同：`in die erste Zelle verschieben` | 同：`Mover a la primera celda` | 同：`Déplacer dans la première cellule` | 同义：Ely `最初のセルに移動`，其 `先頭セルに移動` | 同义：Ely `첫 셀로 옮기기`，其 `첫 번째 셀로 이동` | 同：`chuyển vào ô đầu tiên` |
+| `table.merge.keep` | sc `Keep the contents of the hidden cells` | 同义：Ely `Verborgen behalten`，其 `ausgeblendeten … erhalten` | 同：`Mantener … ocultos` | 同义：Ely `Garder masquées`，其 `Conserver … cachées` | 同义：Ely `隠したままにする`，其 `非表示… 保持する` | 同义：Ely `숨겨 두기`，其 `숨겨진 … 유지` | 其无译文 |
+| `settings.storage.ask_now`、`settings.storage.ask_later`、`tree.discard.tracked` 的末句 | cui `This action cannot be undone.` | 同：`nicht rückgängig` | 同：`no se puede deshacer` | 不同写法：Ely `Cette action est irréversible`，其 `ne peut pas être annulée`（法语的 `Annuler` 兼作“取消”，Ely 避开） | 不同写法：Ely `元に戻すことはできません`（与“撤销”一项同词），其 `やり直しはできません` | 同：`되돌릴 수 없습니다` | 同：`Không thể hoàn tác` |
+| `office.conflict.title` | uui `The file has been changed since it was opened …`（其问的是“仍要保存吗”，Ely 问留哪一份，只比“已被改动”一词） | 同：`geändert` | 同义：Ely `ha cambiado`，其 `fue modificado` | 同义：Ely `a changé`，其 `a été modifié` | 同：`変更されました` | 同义：Ely `바뀌었습니다`，其 `변경되었습니다` | 同：`đã … thay đổi` |
+
+所见：没有把后果说反或说漏的；“同义”各处是近义词或敬语的不同，未改。越南语有三句 LibreOffice 自己没译。
+
+无对应项、未对照的（LibreOffice 没有邮件与 Git，也没有这些功能的提示）：`doc.section.title`、`doc.section.detail`；`table.delete.title`、`table.delete.alone`、`table.delete.refs`、`table.delete.dynamic`（LibreOffice 删工作表不带这类说明）；`office.conflict.detail`；`gallery.delete.title`、`gallery.delete.message`；`mail.erase.title`、`mail.erase.message`、`mail.mbox.remove_title`、`mail.mbox.remove_message`、`mail.remove.title`、`mail.remove.message`、`mail.write.discard.title`、`mail.write.discard.message`、`mail.storage.forget_title`、`mail.storage.forget_message`、`mail.outbox.quit.title`、`mail.outbox.quit.message`、`mail.outbox.quit.sending`；`pdf.redact.count`、`pdf.removal.warning`；`settings.storage.ask_title`；`tree.abort`、`tree.clean`、`tree.conflict.delete`、`tree.delete_branch`、`tree.delete_tag`、`tree.discard`（除末句）、`tree.force`、`tree.force_delete`、`tree.move`、`tree.rebase`、`tree.remote.remove`、`tree.skip`、`tree.stash.drop`、`tree.worktree.remove` 各自的标题与说明（带 `.one` 的单数形式同）。这些句子在六种语言里没有任何外部译文可比，只有母语者能校。
+
+## 上游待办
+
+组件库与 gpui 尚缺、须在上游补的项，及其现状。
+
+| 缺口 | 现状 |
+| --- | --- |
+| 组件无 role/aria 语义：菜单、列表等控件在 AX 树仍不可见 | 上游已修核心控件（7380afb：Button、TextInput、Tabs、面板行、对话框等）；其余上游待办。项目自绘控件已自带；`overlays::PromptDialog` 以标签给字段命名见 R15.68（组件库 3aab6d4 起，现 pin 已含；真窗口核对待做） |
+| 标签栏里滚出可见范围的标签：辅助技术的“按下”落空 | gpui 对一个节点的默认动作是点它的中心，标签滚到栏外时中心不在窗口里，点不到（2026-11-10，R18.28：ElyPDF 开 20 份时前 11 个标签按不到，测试工具改为把文件再交给应用来切换）；“全部标签”按钮里的列表可达。上游待办：按下前先把节点滚进可见处 |
+| gpui 无 aria-disabled API（`AriaProperties` 无 disabled 字段） | 组件 7380afb 起以本地化 aria_description 表达；上游待办：gpui 补 API |
+| 组件内部文案未接 i18n（Ely 用到的组件已接：提示、默认占位、补全空行、字号示例，6df9ab0；查找框、排序与筛选、密码开关，a4bf696；`i18n/tests/shipped.rs` 防回退；其余组件之外：欢迎页标题、菜单项等） | 面板族文案已接 i18n（7380afb，内建 en/zh-CN），`CommentSidebar` 与 `RelativeTime` 同（408f2b0）；其余上游待办 |
+| 反馈条的角色与名字 | 已修：`feedback::Banner`（fac20ab：危险与警告为 alert，其余为 status，名为其文字），`feedback::Alert` 同（105bf94，名为标题与正文） |

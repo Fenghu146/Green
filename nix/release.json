@@ -1,0 +1,47 @@
+{
+  "version": "0.1.16",
+  "apps": {
+    "ely-doc": {
+      "name": "ElyDoc",
+      "license": "MIT AND MPL-2.0",
+      "url": "https://github.com/ELY-Open-Source/ElyOffice/releases/download/v0.1.16/ElyDoc-0.1.16-linux-x86_64.AppImage",
+      "sha256": "64228e8502e300c373c25fb3d93fc45c912dfbdd0ddca1c5b058725cb0417bf2"
+    },
+    "ely-table": {
+      "name": "ElyTable",
+      "license": "MIT AND MPL-2.0",
+      "url": "https://github.com/ELY-Open-Source/ElyOffice/releases/download/v0.1.16/ElyTable-0.1.16-linux-x86_64.AppImage",
+      "sha256": "35b56377c175dd97b9990943cf2679ccc1e706998b52e0c43ce7039d5dbc3c6d"
+    },
+    "ely-show": {
+      "name": "ElyShow",
+      "license": "MIT AND MPL-2.0",
+      "url": "https://github.com/ELY-Open-Source/ElyOffice/releases/download/v0.1.16/ElyShow-0.1.16-linux-x86_64.AppImage",
+      "sha256": "a780290cbefff2e174653de275866b5b7739cdfe2c1674f6da127e99773e521b"
+    },
+    "ely-pdf": {
+      "name": "ElyPDF",
+      "license": "MIT AND AGPL-3.0-or-later",
+      "url": "https://github.com/ELY-Open-Source/ElyOffice/releases/download/v0.1.16/ElyPDF-0.1.16-linux-x86_64.AppImage",
+      "sha256": "6786d15e7746ec22613f2873a276f5c31636d975f8479ee53def7a4c6b66bb93"
+    },
+    "ely-mail": {
+      "name": "ElyMail",
+      "license": "MIT",
+      "url": "https://github.com/ELY-Open-Source/ElyOffice/releases/download/v0.1.16/ElyMail-0.1.16-linux-x86_64.AppImage",
+      "sha256": "ef51d40d61d4e6cec8af24f4283ad7d7c47a25025ad45cf94c3646aa70389ab5"
+    },
+    "ely-tree": {
+      "name": "ElyTree",
+      "license": "MIT AND GPL-2.0-only",
+      "url": "https://github.com/ELY-Open-Source/ElyOffice/releases/download/v0.1.16/ElyTree-0.1.16-linux-x86_64.AppImage",
+      "sha256": "bd687d6374d36fdb9f772f97d61743f59158735d77bedf6badde294944eee078"
+    },
+    "ely-mark": {
+      "name": "ElyMark",
+      "license": "MIT AND AGPL-3.0-or-later AND GPL-2.0-only",
+      "url": "https://github.com/ELY-Open-Source/ElyOffice/releases/download/v0.1.16/ElyMark-0.1.16-linux-x86_64.AppImage",
+      "sha256": "09a885d178ba6a2383f7c97e39a23175eb113410eb66e44f5ec581f2ca62de38"
+    }
+  }
+}

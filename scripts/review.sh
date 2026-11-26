@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Usage: review.sh <item-id> <round> [path...] — Pi, K3.1 Pro, high.
+set -euo pipefail
+
+[ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ] || { echo "review.sh: not inside a herdr pane" >&2; exit 2; }
+id=${1:?item id}
+round=${2:?round}
+shift 2
+scope=${*:-"the files this item touched; find them from the item line and the tree"}
+
+cd "$(dirname "$0")/.."
+name="rv-$(echo "$id" | tr 'A-Z.' 'a-z-')-r$round"
+verdict="tasks/reviews/$id-r$round.md"
+mkdir -p tasks/reviews
+rm -f "$verdict"
+
+# The reviewer's tests keep off the user's data folder.
+data=$PWD/.work/$id-r$round/data/ElyOffice
+mkdir -p "$data"
+# This machine's agents share one cargo lock.
+run="env ELY_DATA_ROOT='$data'"
+[ ! -x .work/bin/cargo ] || run="$run PATH='$PWD/.work/bin:$PATH'"
+
+# The list that holds the item.
+list=$(grep -l -- "] $id " tasks/TASKS.md tasks/BUGS.md site/TASKS.md site/video/TASKS.md | head -n 1)
+[ -n "$list" ] || { echo "review.sh: no item $id in any task list" >&2; exit 2; }
+prompt="You review item $id of Ely Office, round $round. Work dir is the project root; agents.md holds the rules; docs/decisions.md is the dated decision log.
+Read the line for $id in $list and the PRD.md sections it cites (for tasks/BUGS.md: its entry in docs/BugList.md); the items before it in that list are done.
+Scope: $scope
+Find defects only: behavior that breaks the PRD, errors swallowed, silent fallbacks, dead code, files over 500 lines, comments over one line or ten words, boxes inside boxes or useless subtitles in UI, abstractions with one user, missing or weak tests, claims no evidence backs. Build and run the tests yourself.
+Every probe copy, file and log stays inside the project root, under .work/$id-r$round/, on every host: never C:\\, never the folder above the project, never any other place outside it. Build only with the installed cargo, huacnlee/cargo; never switch toolchains. It ignores CARGO_TARGET_DIR, keeps its intermediates in ~/.cargo/targets and puts binaries in ./target of the tree it builds, so a probe copy under .work/$id-r$round/ keeps its binaries there. cargo check and clippy need CARGO_CHECK_SHARED_DEPS=0; kernel tests need ELY_LOK_WORKER or ELY_PDF_WORKER. Write the verdict first, then delete those copies; keep only small logs. Delete nothing outside .work/$id-r$round/: other folders under .work belong to the author and other agents. If a deletion is refused, add a last line to the verdict naming what is left.
+On Windows, build and run nothing under %TEMP%: Application Control blocks programs there. Linux runs in WSL (wsl -d Ubuntu); its clone at ~/Documents/Github/ElyOffice holds this tree's changes.
+Every test run has a data root of its own: this pane sets ELY_DATA_ROOT=$data. On another host set ELY_DATA_ROOT to .work/$id-r$round/data/ElyOffice under that host's checkout before any test; never let a test reach the real data folder.
+Do not suggest enhancements. Do not reject for taste. Edit no file except the verdict.
+Round 2 and later: read the previous verdict tasks/reviews/$id-r$((round - 1)).md, confirm each defect is fixed, then look for new defects in changed code.
+Write the verdict to $verdict. Line one is PASS or FAIL. After that, one entry per defect: file:line, what is wrong, a concrete failing scenario, the direction of the fix.
+When done, reply with the single word PASS or FAIL."
+
+# A pane left by a failed round closes first.
+mkdir -p tasks/reviews/.panes
+last=tasks/reviews/.panes/$id
+# Native Windows jq ends lines with CRLF.
+field() { jq -r "$@" | tr -d '\r'; }
+if [ -f "$last" ]; then
+  old=$(cat "$last")
+  if ! said=$(herdr pane get "$old" 2>&1); then
+    # Only a pane herdr no longer knows is skipped.
+    code=$(field '.error.code' <<<"$said" 2>/dev/null) && [ "$code" = pane_not_found ] \
+      || { echo "review.sh: pane $old unreadable: $said" >&2; exit 1; }
+  else
+    err=$(herdr pane close "$old" 2>&1) || { echo "review.sh: pane $old did not close: $err" >&2; exit 1; }
+  fi
+  rm -f "$last"
+fi
+# Callers in every worktree place one at a time.
+lock=$(git rev-parse --git-common-dir)/review-place.lock || { echo "review.sh: not in a git tree" >&2; exit 2; }
+for ((t = 0; ; t++)); do
+  mkdir "$lock" 2>/dev/null && break
+  [ "$t" -lt 30 ] || { echo "review.sh: $lock held for 30 s; remove it if no review.sh is placing" >&2; exit 1; }
+  sleep 1
+done
+trap 'rmdir "$lock"' EXIT
+# Each reviewer keeps ten terminal rows; herdr's chrome takes two.
+room=10 chrome=2
+right=$(herdr pane neighbor --direction right --pane "$HERDR_PANE_ID" | field '.result.neighbor.neighbor_pane_id // empty') \
+  && lay=$(herdr pane layout --pane "$HERDR_PANE_ID" | field -c '.result.layout') \
+  || { echo "review.sh: no layout for $HERDR_PANE_ID" >&2; exit 1; }
+if [ -z "$right" ]; then
+  made=$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --cwd "$PWD" --no-focus 2>&1) || :
+else
+  tall=$(field --arg r "$right" '.panes as $p | ($p[] | select(.pane_id == $r) | .rect.x) as $x
+    | [$p[] | select(.rect.x == $x)] | max_by(.rect.height) | "\(.pane_id) \(.rect.height)"' <<<"$lay")
+  [ -n "$tall" ] || { echo "review.sh: $right not in the layout: $lay" >&2; exit 1; }
+  if [ "${tall#* }" -ge $((2 * (room + chrome))) ]; then
+    made=$(herdr pane split --pane "${tall% *}" --direction down --cwd "$PWD" --no-focus 2>&1) || :
+  else
+    # A full column sends the reviewer to its own tab.
+    made=$(herdr tab create --workspace "$(field .workspace_id <<<"$lay")" --cwd "$PWD" --label "$name" --no-focus 2>&1) || :
+  fi
+fi
+pane=$(field '(.result.pane // .result.root_pane).pane_id' <<<"$made" 2>/dev/null) || :
+[ -n "$pane" ] && [ "$pane" != null ] || { echo "review.sh: no pane for $name: $made" >&2; exit 1; }
+echo "$pane" >"$last"
+rmdir "$lock"
+trap - EXIT
+ask=.work/$id-r$round/prompt.md
+mkdir -p "${ask%/*}"
+# Each step of this start, to trace a stall.
+trace=${ask%/*}/start.log
+note() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$trace"; }
+note "pane $pane for $name"
+fail() {
+  note "failed: $*"
+  herdr pane read "$pane" --source recent-unwrapped --lines 40 >>"$trace" 2>&1 || :
+  echo "review.sh: $name in $pane $*; pane left open; trace in $trace" >&2
+  exit 1
+}
+# Herdr's error code and message, else its raw reply.
+why() { field -e '.error | select(.code) | "\(.code): \(.message)"' <<<"$1" 2>/dev/null || echo "$1"; }
+# The pane's last eight lines.
+screen() {
+  text=$(herdr pane read "$pane" --source visible 2>&1) || text="unreadable: $text"
+  grep -v '^[[:space:]]*$' <<<"$text" | tail -n 8 || :
+}
+# Typed text races an agent's startup; argv does not.
+printf '%s\n' "$prompt" >"$ask"
+started=$SECONDS
+said=$(herdr pane run "$pane" "$run pi --model remote-magpie/kimi/k3.1-pro --thinking high \"Do what $ask says.\"" 2>&1) \
+  || fail "did not start pi: $(why "$said")"
+note "ran pi"
+# Herdr finds Pi a moment after it starts.
+seen=
+for ((t = 0; ; t++)); do
+  if said=$(herdr agent get "$pane" 2>&1); then
+    s=$(field '.result.agent.agent_status' <<<"$said") || fail "status unreadable: $said"
+  else
+    s=$(field '.error.code' <<<"$said" 2>/dev/null) || :
+    [ "$s" = agent_not_found ] || fail "status unreadable: $(why "$said")"
+  fi
+  [ "$s" = "$seen" ] || note "$s after $((SECONDS - started)) s"
+  seen=$s
+  case $s in working | blocked) break ;; esac
+  [ "$t" -lt 60 ] || fail "never began the prompt in 2 minutes, at: $(screen)"
+  sleep 2
+done
+# Blocked ten polls running: show the screen, then close.
+blocked() {
+  text=$(screen)
+  err=$(herdr pane close "$pane" 2>&1) || fail "stayed blocked 5 minutes at: $text; did not close: $err"
+  rm -f "$last"
+  note "blocked 5 minutes at: $text; pane closed"
+  echo "review.sh: $name in $pane stayed blocked 5 minutes at: $text; pane closed" >&2
+  exit 1
+}
+# Pi idles while its own background runs work.
+b=0
+for ((i = 0; ; i++)); do
+  s=$(herdr agent get "$pane" | field '.result.agent.agent_status') || fail "status unreadable"
+  [ "$s" = "$seen" ] || note "$s after $((SECONDS - started)) s"
+  seen=$s
+  [ "$s" = blocked ] && b=$((b + 1)) || b=0
+  case $s in
+    done | idle) head -n 1 "$verdict" 2>/dev/null | tr -d '\r' | grep -qxE 'PASS|FAIL' && break ;;
+    working) ;;
+    blocked) [ "$b" -le 10 ] || blocked ;;
+    *) fail "ended $s" ;;
+  esac
+  [ "$i" -lt 360 ] || fail "left no verdict at $verdict in 3 hours"
+  sleep 30
+done
+err=$(herdr pane close "$pane" 2>&1) || fail "did not close: $err"
+rm -f "$last"
+note "verdict $(head -n 1 "$verdict" | tr -d '\r'); pane closed"
+cat "$verdict"

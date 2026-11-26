@@ -1,0 +1,20 @@
+[package]
+name = "ely-login"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+ely-platform = { workspace = true, features = ["test-support"] }
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+ely-platform.workspace = true
+log.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[lints]
+workspace = true

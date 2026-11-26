@@ -1,0 +1,3 @@
+# LF everywhere; upstream copies keep their bytes.
+* text=auto eol=lf
+vendor/** -text

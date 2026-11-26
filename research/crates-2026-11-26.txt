@@ -1,0 +1,67 @@
+ropey|1.6.1|16211342|2025-08-02|MIT OR Apache-2.0|https://github.com/cessen/ropey
+parley|0.13.0|6894299|2026-11-12|Apache-2.0 OR MIT|https://github.com/linebender/parley
+cosmic-text|0.19.0|13370605|2026-04-22|MIT OR Apache-2.0|https://github.com/pop-os/cosmic-text
+swash|0.2.10|20744514|2026-07-17|Apache-2.0 OR MIT|https://github.com/dfrg/swash
+rustybuzz|0.20.1|43415660|2024-11-12|MIT|https://github.com/harfbuzz/rustybuzz
+fontdb|0.24.0|49935664|2026-07-29|MIT|https://github.com/RazrFalcon/fontdb
+gpui|0.2.2|570697|2026-10-30|Apache-2.0|https://github.com/zed-industries/zed
+egui|0.37.0|33358590|2026-10-15|MIT OR Apache-2.0|https://github.com/emilk/egui
+iced|0.14.0|3510528|2025-12-07|MIT|https://github.com/iced-rs/iced
+slint|1.19.1|2803013|2026-11-24|GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0|https://github.com/slint-ui/slint
+dioxus|0.7.10|3961725|2026-10-16|MIT OR Apache-2.0|https://github.com/DioxusLabs/dioxus/
+floem|0.2.0|47479|2024-11-14|MIT|https://github.com/lapce/floem
+tauri|2.12.7|48004563|2026-11-18|Apache-2.0 OR MIT|https://github.com/tauri-apps/tauri
+winit|0.30.13|69564050|2026-10-24|Apache-2.0|https://github.com/rust-windowing/winit
+docx-rs|0.4.22|4018410|2026-07-21|MIT|https://github.com/bokuweb/docx-rs
+umya-spreadsheet|3.1.1|1633987|2026-10-26|MIT|https://github.com/MathNya/umya-spreadsheet
+rust_xlsxwriter|0.104.0|7428708|2026-11-22|MIT OR Apache-2.0|https://github.com/jmcnamara/rust_xlsxwriter
+calamine|0.38.0|19950438|2026-11-02|MIT|https://github.com/tafia/calamine
+zip|9.8.2|363562582|2026-11-23|MIT|https://github.com/zip-rs/zip2
+quick-xml|0.42.0|580478037|2026-08-22|MIT|https://github.com/tafia/quick-xml
+pdfium-render|0.9.6|4282263|2026-11-21|MIT OR Apache-2.0|https://github.com/ajrcarey/pdfium-render
+mupdf|0.8.0|1798980|2026-06-22|AGPL-3.0|https://github.com/messense/mupdf-rs
+lopdf|0.47.0|33040913|2026-11-04|MIT|https://github.com/J-F-Liu/lopdf.git
+printpdf|0.13.0|4296719|2026-11-25|MIT|https://github.com/fschutt/printpdf
+pdf-extract|0.12.1|8965877|2026-09-16|MIT|https://github.com/jrmuizel/pdf-extract
+pulldown-cmark|0.13.6|221056319|2026-10-30|MIT|https://github.com/raphlinus/pulldown-cmark
+comrak|1.2.0|11002311|2026-11-23|BSD-2-Clause|https://github.com/kivikakk/comrak
+markdown|1.0.0|16473756|2025-04-23|MIT|https://github.com/wooorm/markdown-rs
+tree-sitter|0.27.2|60430133|2026-11-07|MIT|https://github.com/tree-sitter/tree-sitter
+syntect|5.3.0|44106837|2025-09-27|MIT|https://github.com/trishume/syntect
+typst|0.15.1|4475552|2026-07-17|Apache-2.0|https://github.com/typst/typst
+arboard|3.7.0|72771884|2026-10-15|MIT OR Apache-2.0|https://github.com/1Password/arboard
+accesskit|0.25.2|38353699|2026-10-25|MIT OR Apache-2.0|https://github.com/AccessKit/accesskit
+rfd|0.18.0|49080250|2026-11-07|MIT|https://github.com/PolyMeilex/rfd
+windows|0.62.2|428598530|2025-10-06|MIT OR Apache-2.0|https://github.com/microsoft/windows-rs
+webview2-com|0.39.1|32631003|2026-03-11|MIT|https://github.com/wravery/webview2-rs
+wasmtime|51.0.0|47091491|2026-11-20|Apache-2.0 WITH LLVM-exception|https://github.com/bytecodealliance/wasmtime
+rhai|1.27.0|15721061|2026-10-21|MIT OR Apache-2.0|https://github.com/rhaiscript/rhai
+mlua|0.12.3|9344165|2026-11-22|MIT|https://github.com/mlua-rs/mlua
+serde|1.0.229|1785262417|2026-07-18|MIT OR Apache-2.0|https://github.com/serde-rs/serde
+tokio|1.54.1|1247133992|2026-10-21|MIT|https://github.com/tokio-rs/tokio
+image|0.25.10|266588161|2026-03-10|MIT OR Apache-2.0|https://github.com/image-rs/image
+resvg|0.50.0|42449855|2026-11-11|Apache-2.0 OR MIT|https://github.com/linebender/resvg
+usvg|0.50.0|45931022|2026-11-11|Apache-2.0 OR MIT|https://github.com/linebender/resvg
+tiny-skia|0.12.0|77289884|2026-02-02|BSD-3-Clause|https://github.com/linebender/tiny-skia
+vello|0.12.0|1283283|2026-11-11|Apache-2.0 OR MIT|https://github.com/linebender/vello
+lyon|1.0.19|9752579|2026-03-08|MIT OR Apache-2.0|https://github.com/nical/lyon
+kurbo|0.13.1|74401580|2026-05-13|Apache-2.0 OR MIT|https://github.com/linebender/kurbo
+font-kit|0.14.3|18913521|2025-05-26|MIT OR Apache-2.0|https://github.com/servo/font-kit
+ab_glyph|0.2.32|57138012|2025-09-28|Apache-2.0|https://github.com/alexheretic/ab-glyph
+ttf-parser|0.25.1|146680559|2024-11-29|MIT OR Apache-2.0|https://github.com/harfbuzz/ttf-parser
+harfrust|0.16.1|23596883|2026-11-19|MIT|https://github.com/harfbuzz/harfrust
+icu_segmenter|2.4.0|34960666|2026-10-22|Unicode-3.0|https://github.com/unicode-org/icu4x
+unicode-linebreak|0.1.5|138273361|2023-07-25|Apache-2.0|https://github.com/axelf4/unicode-linebreak
+unicode-bidi|0.3.18|604025453|2024-12-16|MIT OR Apache-2.0|https://github.com/servo/unicode-bidi
+memchr|2.8.3|1824754413|2026-07-08|Unlicense OR MIT|https://github.com/BurntSushi/memchr
+smallvec|1.16.6|1531606883|2026-11-18|MIT OR Apache-2.0|https://github.com/smallvec/smallvec
+compact_str|0.10.0|230516642|2026-07-13|MIT|https://github.com/ParkMyCar/compact_str
+im|15.1.0|36396562|2022-04-29|MPL-2.0+|https://github.com/bodil/im-rs
+slotmap|1.1.1|142182188|2025-12-06|Zlib|https://github.com/orlp/slotmap
+rstar|0.14.0|59131454|2026-11-01|MIT OR Apache-2.0|https://github.com/georust/rstar
+similar|3.2.1|263763797|2026-10-24|Apache-2.0|https://github.com/mitsuhiko/similar
+zstd|0.14.5|504500147|2026-11-24|BSD-3-Clause|https://github.com/gyscos/zstd-rs
+bincode|3.0.0|391180217|2025-12-16|MIT|https://github.com/bincode-org/bincode
+rkyv|0.8.18|190988810|2026-08-05|MIT|https://github.com/rkyv/rkyv
+sqlx|0.9.1|199755253|2026-11-18|MIT OR Apache-2.0|https://github.com/launchbadge/sqlx
+rusqlite|0.43.0|167256200|2026-11-15|MIT|https://github.com/rusqlite/rusqlite

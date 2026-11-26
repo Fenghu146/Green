@@ -1,0 +1,131 @@
+//! What a document engine gives the shell (§6).
+
+use std::{
+    io,
+    path::Path,
+    sync::{Arc, Mutex},
+};
+
+use ely_platform::AppId;
+use gpui::{App, Context, Entity, FocusHandle, Keystroke, Window};
+
+use crate::Host;
+
+/// Ends a stuck worker; runs outside its lock.
+pub type Stop = Arc<dyn Fn() -> io::Result<()> + Send + Sync>;
+
+/// Where a load starts.
+pub enum Load<'a, I> {
+    /// A file and its password, empty for none.
+    File(&'a Path, &'a str),
+    /// Text bytes already at the path, read as told.
+    Import(&'a Path, &'a I),
+}
+
+/// A kernel behind the shell: loads, writes, history, views.
+pub trait Engine: Sized + 'static {
+    type Worker: Send + 'static;
+    type Doc: Clone + Send + 'static;
+    type View: 'static;
+    /// What a load hands the window.
+    type Loaded: Send + 'static;
+    /// How text files are read.
+    type Import: Clone + Send + 'static;
+    /// Files behind the front wait until shown (R15.57).
+    const PARKS: bool = false;
+
+    /// Loads off the window; a locked file fails PermissionDenied.
+    fn load(worker: &mut Self::Worker, from: Load<Self::Import>) -> io::Result<Self::Loaded>;
+    /// The view over a load, and its document.
+    fn open(
+        worker: &Arc<Mutex<Self::Worker>>,
+        loaded: Self::Loaded,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> io::Result<(Self::Doc, Entity<Self::View>)>;
+    /// Closes a load whose tab closed first.
+    fn discard(worker: &mut Self::Worker, loaded: Self::Loaded) -> io::Result<()>;
+    /// A load its tab let go before it ran.
+    fn skipped(_worker: &mut Self::Worker, _from: Load<Self::Import>) -> io::Result<()> {
+        Ok(())
+    }
+    /// Checked before an overwrite as `format`; a risk stops it.
+    fn unsound(_worker: &mut Self::Worker, _doc: &Self::Doc, _format: &str) -> io::Result<Option<crate::Risk>> {
+        Ok(None)
+    }
+    /// What a copy as `format` loses; it says so.
+    fn lost(_worker: &mut Self::Worker, _doc: &Self::Doc, _format: &str) -> io::Result<Option<crate::Risk>> {
+        Ok(None)
+    }
+    /// What saving in place would lose, macros aside.
+    fn risk(_loaded: &Self::Loaded) -> Option<crate::Risk> {
+        None
+    }
+    /// The sources the document's links read (LOK-11).
+    fn links(_loaded: &Self::Loaded) -> Vec<String> {
+        Vec::new()
+    }
+    /// Reads every link again; the failed sources come back.
+    fn update_links(_worker: &mut Self::Worker, _doc: &Self::Doc) -> io::Result<Vec<String>> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "this engine has no links"))
+    }
+    /// The undo history as a mark to compare.
+    fn history(worker: &mut Self::Worker, doc: &Self::Doc) -> io::Result<String>;
+    /// Writes `doc` as `format` to `path`; `closing` ends open edits.
+    fn write(
+        worker: &mut Self::Worker,
+        doc: &Self::Doc,
+        path: &Path,
+        format: &str,
+        closing: bool,
+    ) -> io::Result<()>;
+    /// A copy of `doc` at `path`; `doc` stays.
+    fn snapshot(_worker: &mut Self::Worker, _doc: &Self::Doc, _path: &Path, format: &str) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, format!("no snapshot as .{format}")))
+    }
+    /// A recovery point; input may stop it (`Interrupted`).
+    fn point(worker: &mut Self::Worker, doc: &Self::Doc, path: &Path, format: &str) -> io::Result<()> {
+        Self::snapshot(worker, doc, path, format)
+    }
+    fn close(worker: &mut Self::Worker, doc: Self::Doc) -> io::Result<()>;
+    /// A closing view's images, for the shell to free.
+    fn retire(view: &Entity<Self::View>, cx: &mut App) -> ely_gpui_component::primitives::Retired;
+    /// Its tab left the screen; queued drawing stops.
+    fn hide(_view: &Entity<Self::View>, _cx: &mut App) {}
+    /// Input typed while it loaded; only parking engines hold.
+    fn replay(_view: &Entity<Self::View>, keys: Vec<Keystroke>, _window: &mut Window, _cx: &mut App) {
+        log::error!("office: {} held inputs reached an engine that never holds", keys.len());
+    }
+    /// Why the worker ended, if it did (§6.3).
+    fn ended(_worker: &mut Self::Worker) -> Option<String> {
+        None
+    }
+    /// Ends the worker from outside its lock; None cannot.
+    fn stopper(_worker: &Self::Worker) -> Option<Stop> {
+        None
+    }
+    /// A fresh worker in place of an ended one.
+    fn restart(_app: AppId, _worker: &mut Self::Worker) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "this engine does not restart"))
+    }
+    /// Every input sent has reached the kernel.
+    fn settled(view: &Self::View) -> bool;
+    /// Edits landed so far.
+    fn edited(view: &Self::View) -> u64;
+    /// An edit may have changed it, unreported yet.
+    fn edit_pending(view: &Self::View) -> bool;
+    /// When a key last went in; saves wait on it.
+    fn typed_at(_view: &Self::View) -> Option<std::time::Instant> {
+        None
+    }
+    fn focus(view: &Self::View) -> FocusHandle;
+    /// The document was saved at history `mark`.
+    fn saved(view: &Entity<Self::View>, mark: &str, cx: &mut App);
+    /// Calls `reported` and `failed`; the tab keeps the subscriptions.
+    fn watch<H: Host<Engine = Self>>(
+        view: &Entity<Self::View>,
+        cx: &mut Context<H>,
+        reported: impl Fn(&mut H, &Entity<Self::View>, bool, &mut Context<H>) + 'static,
+        failed: impl Fn(&mut H, &str, &mut Context<H>) + 'static,
+    ) -> Vec<gpui::Subscription>;
+}

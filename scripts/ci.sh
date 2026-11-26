@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# A platform's release. Usage: ci.sh <macos|windows|linux> <tag>
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+# Bash 3.2 exits 0 after a set -u abort.
+if [ "$(uname -s)" = Darwin ] && [ "${BASH_VERSINFO[0]}" -lt 5 ]; then
+  echo "ci.sh: bash $BASH_VERSION; macOS needs bash 5 (doctor.sh)" >&2
+  exit 1
+fi
+# Python's UTF-8 mode: a service's console is cp1252 on Windows.
+export PYTHONUTF8=1
+os=${1:?macos, windows or linux}
+tag=${2:?the release tag, such as v0.1.3}
+version=$(awk -F'"' '/^version = / { print $2; exit }' "$root/Cargo.toml")
+[ "$tag" = "v$version" ] || {
+  echo "ci.sh: tag $tag is not v$version" >&2
+  exit 1
+}
+# The compatibility list names this version and its patches.
+python3 "$root/scripts/compatibility.py" --check
+# The record counts unreviewed fixes, explains a short gap.
+python3 "$root/scripts/release-gate.py" "$version"
+# This system's benchmark of this version, slowdowns explained.
+python3 "$root/tests/perf/baseline.py" --check "$version" "$os"
+: "${ELY_RELEASE_TOKEN:?the GitHub token that uploads}"
+repo=ELY-Open-Source/ElyOffice
+api=https://api.github.com/repos/$repo
+auth=(-H "Authorization: Bearer $ELY_RELEASE_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+# pr.yml passed on this commit, or nothing ships.
+sha=$(git -C "$root" rev-parse HEAD)
+passed=$(curl -fsS "${auth[@]}" "$api/actions/workflows/pr.yml/runs?head_sha=$sha&status=success" |
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["total_count"])' | tr -d '\r')
+[ "$passed" -ge 1 ] || {
+  echo "ci.sh: pr.yml has not passed on $sha; nothing is built" >&2
+  exit 1
+}
+: "${ELY_MICROSOFT_CLIENT_ID:?the Microsoft OAuth client ID}"
+: "${ELY_UPDATE_KEY:?the release key that signs update manifests}"
+if [ "$os" = macos ]; then
+  : "${ELY_SIGN_IDENTITY:?the Developer ID Application certificate}"
+  : "${ELY_NOTARY_PROFILE:?the notarytool keychain profile}"
+  : "${ELY_INSTALLER_IDENTITY:?the Developer ID Installer certificate}"
+  # A hung coreaudiod or locked keychain fails here, not late.
+  "$BASH" "$root/scripts/mac-ready.sh" "$ELY_NOTARY_PROFILE"
+fi
+[ -z "${ELY_PATH:-}" ] || PATH=$ELY_PATH:$PATH
+# Its scripts run this bash, not Homebrew's arm64 one.
+[ "$(uname -s)" != Darwin ] || PATH=$(dirname "$BASH"):$PATH
+cd "$root"
+# Linux builds and packages in the AlmaLinux 8 container.
+inside=()
+case $os in
+  macos | windows) ;;
+  linux) inside=(packaging/linux/container.sh) ;;
+  *)
+    echo "ci.sh: no release for $os" >&2
+    exit 1
+    ;;
+esac
+# Releases build with huacnlee/cargo only.
+fork() { # the command it runs in
+  local got
+  got=$("$@" cargo --version)
+  [[ $got == *huacnlee/cargo* ]] || {
+    echo "ci.sh: ${*:-this host} has $got, not huacnlee/cargo (https://huacnlee.github.io/cargo/)" >&2
+    exit 1
+  }
+}
+fork
+[ ${#inside[@]} -eq 0 ] || fork "${inside[@]}"
+
+# Intel Macs run under Rosetta: x86_64 Rust, pinned OpenSSL.
+intel=
+if [ "$os" = macos ] && [ "$(uname -s)-$(uname -m)" = Darwin-x86_64 ]; then
+  intel=1
+  channel=$(awk -F'"' '$1 ~ /^channel/ { print $2 }' rust-toolchain.toml)
+  export RUSTUP_TOOLCHAIN=$channel-x86_64-apple-darwin PKG_CONFIG_PATH=$root/engines/openssl/lib/pkgconfig
+fi
+# Linux's MuPDF links the pinned static OpenSSL too.
+pinned_ssl=
+if [ -n "$intel" ] || [ "$os" = linux ]; then
+  pinned_ssl=1
+fi
+
+# Engines another clone on this host built; else built here.
+if [ -n "${ELY_SHARE:-}" ]; then
+  for part in engines reference; do
+    # Never mix this clone's own build with shared engines.
+    if [ "$os" != windows ] && { [ -e "$part" ] || [ -L "$part" ]; }; then
+      # A sentinel keeps a trailing newline in the target.
+      target=$( (readlink "$part" || true) && printf x)
+      target=${target%x}
+      [ "$target" = "$ELY_SHARE/$part"$'\n' ] || {
+        echo "ci.sh: $root/$part is not a link to $ELY_SHARE/$part; remove it" >&2
+        exit 1
+      }
+    fi
+    if [ ! -e "$part" ]; then
+      case $os in
+        windows) powershell -NoProfile -Command "New-Item -ItemType Junction -Path '$part' -Target '$(cygpath -w "$ELY_SHARE/$part")' | Out-Null" ;;
+        *) ln -s "$ELY_SHARE/$part" "$part" ;;
+      esac
+    fi
+  done
+else
+  scripts/fetch-references.sh
+  [ -z "$pinned_ssl" ] || ${inside[@]+"${inside[@]}"} scripts/build-openssl.sh
+  ${inside[@]+"${inside[@]}"} scripts/build-mupdf.sh
+  ${inside[@]+"${inside[@]}"} scripts/build-git.sh
+  ${inside[@]+"${inside[@]}"} scripts/fetch-git-lfs.sh
+  ${inside[@]+"${inside[@]}"} scripts/fetch-tessdata.sh
+  ${inside[@]+"${inside[@]}"} scripts/build-libreoffice.sh
+fi
+# A shared engine may lag the series (R20.60).
+scripts/apply-lo-patches.sh --check engines/lo-src
+
+if [ -n "$pinned_ssl" ]; then
+  [ -f "$root/engines/openssl/lib/pkgconfig/libcrypto.pc" ] || {
+    echo "ci.sh: no pinned OpenSSL in engines/openssl; run scripts/build-openssl.sh" >&2
+    exit 1
+  }
+fi
+[ "$(uname -s)" != Darwin ] || tests/scripts/engine-arch.sh "$(uname -m)"
+# One failing test and nothing ships.
+scripts/release-tests.sh
+
+dist=$root/dist
+rm -rf "$dist"
+batch=$(awk -F'\t' '$4 == 1 { print $1 }' packaging/apps.tsv)
+case $os in
+  macos) packaging/macos/release.sh 1 ;;
+  windows)
+    packaging/windows/installer.sh
+    ;;
+  linux)
+    for slug in $batch; do ${inside[@]+"${inside[@]}"} packaging/linux/package.sh "$slug"; done
+    ${inside[@]+"${inside[@]}"} packaging/linux/bundle.sh
+    # The packaged binaries need AlmaLinux 8's glibc at most.
+    ${inside[@]+"${inside[@]}"} tests/scripts/linux-glibc.sh
+    ;;
+esac
+
+# Windows checkouts flatten symlinks; macOS and x86_64 Linux write source.
+if [ "$os" = linux ]; then
+  packaging/source.sh "$dist"
+fi
+
+# The apps take no manifest without its signature.
+manifests=()
+for manifest in "$dist"/*.json; do
+  if [ -e "$manifest" ]; then manifests+=("$manifest"); fi
+done
+[ ${#manifests[@]} = 0 ] || ${inside[@]+"${inside[@]}"} packaging/sign.sh "${manifests[@]}"
+
+# A pre-release, made by whichever platform comes first.
+release_id() { curl -fsS "${auth[@]}" "$api/releases/tags/$tag" | python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])' | tr -d '\r'; }
+if ! id=$(release_id 2>/dev/null); then
+  body="{\"tag_name\": \"$tag\", \"name\": \"Ely Office $version\", \"prerelease\": true}"
+  # Another platform may make it first (422); the read decides.
+  curl -fsS "${auth[@]}" -H "Content-Type: application/json" -d "$body" "$api/releases" >/dev/null || true
+  id=$(release_id)
+fi
+names=()
+for file in "$dist"/*; do
+  [ -f "$file" ] || continue
+  name=$(basename "$file")
+  # Only x86_64 Linux publishes the source.
+  if [ "$os" != linux ] && [[ $name == *-source.tar* ]]; then
+    echo "ci.sh: $name is x86_64 Linux's to upload"
+    continue
+  fi
+  names+=("$name")
+done
+# Asset ids and names, 100 per page; strip CRLF.
+have=
+for ((page = 1; ; page++)); do
+  got=$(curl -fsS "${auth[@]}" "$api/releases/$id/assets?per_page=100&page=$page" |
+    python3 -c 'import json, sys; print("\n".join("%s\t%s" % (a["id"], a["name"]) for a in json.load(sys.stdin)))' | tr -d '\r')
+  [ -n "$got" ] || break
+  have+=$got$'\n'
+done
+# A rerun replaces its own uploads, keeps others'.
+cd "$dist"
+for name in "${names[@]}"; do
+  for old in $(awk -F'\t' -v name="$name" '$2 == name { print $1 }' <<<"$have"); do
+    echo "ci.sh: replacing $name"
+    curl -fsS "${auth[@]}" -X DELETE "$api/releases/assets/$old" >/dev/null
+  done
+  echo "ci.sh: uploading $name"
+  curl -fsS "${auth[@]}" -H "Content-Type: application/octet-stream" --data-binary "@$name" \
+    "https://uploads.github.com/repos/$repo/releases/$id/assets?name=$name" >/dev/null
+done
+echo "ci.sh: $os uploaded to $tag"

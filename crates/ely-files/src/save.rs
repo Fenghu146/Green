@@ -1,0 +1,332 @@
+use std::{
+    io::{self, Write as _},
+    path::{Path, PathBuf},
+};
+
+use crate::{Fingerprint, SaveState};
+
+mod attach;
+mod write;
+#[cfg(test)]
+mod tests;
+#[cfg(all(test, target_os = "macos"))]
+mod full;
+#[cfg(all(test, unix))]
+mod readonly;
+
+pub use attach::{import_attachment, write_attachment};
+#[cfg(test)]
+pub(crate) use write::{save, save_as};
+pub use write::{Done, Write};
+
+/// The largest name the filesystem takes.
+const NAME_MAX: usize = 255;
+
+/// `error` with the path in its message.
+fn with_path(path: &Path, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("{}: {error}", path.display()))
+}
+
+/// A folder refusing new files, worded by its name.
+fn unwritable(folder: &Path, path: &Path, error: io::Error) -> io::Error {
+    if !matches!(error.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem) {
+        return with_path(path, error);
+    }
+    log::warn!("files: the folder takes no new file ({:?})", error.kind());
+    match folder.file_name() {
+        Some(name) => ely_ipc::Worded::error(error.kind(), "office.save.folder", &[("folder", &name.to_string_lossy())]),
+        // A drive's root has no name, only a path.
+        None => ely_ipc::Worded::error(error.kind(), "office.save.root", &[]),
+    }
+}
+
+/// The directory a path lives in (bare names: `.`).
+fn parent_dir(path: &Path) -> &Path {
+    match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    }
+}
+
+/// `stem` capped so `suffix` survives the name limit (FILE-09).
+fn with_suffix(stem: &str, suffix: &str) -> String {
+    take_bytes(stem, NAME_MAX.saturating_sub(suffix.len())) + suffix
+}
+
+/// `text` taken head-first within `max` bytes, on char edges.
+fn take_bytes(text: &str, max: usize) -> String {
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in text.chars() {
+        let len = ch.len_utf8();
+        if used + len > max {
+            break;
+        }
+        out.push(ch);
+        used += len;
+    }
+    out
+}
+
+/// A collision name: the counter always survives.
+fn numbered_name(stem: &str, counter: u32, ext: &str) -> String {
+    let middle = format!("-{counter}");
+    let ext = take_bytes(ext, 32);
+    let dot = if ext.is_empty() { "" } else { "." };
+    let room = NAME_MAX.saturating_sub(middle.len() + dot.len() + ext.len());
+    format!("{}{middle}{dot}{ext}", take_bytes(stem, room))
+}
+
+/// Writes `bytes` beside `path`, checks the write, then replaces (FILE-04).
+pub fn save_atomic(path: &Path, bytes: &[u8], revision: u64) -> io::Result<Fingerprint> {
+    let target = resolved(path)?;
+    let folder = parent_dir(&target);
+    let mut staging = tempfile::NamedTempFile::new_in(folder).map_err(|e| unwritable(folder, path, e))?;
+    staging.write_all(bytes).map_err(|e| with_path(path, e))?;
+    staging
+        .as_file()
+        .sync_all()
+        .map_err(|e| with_path(path, e))?;
+    if let Ok(meta) = std::fs::metadata(&target) {
+        staging
+            .as_file()
+            .set_permissions(meta.permissions())
+            .map_err(|e| with_path(path, e))?;
+        copy_acl(&target, staging.path()).map_err(|e| with_path(path, e))?;
+    }
+    // tempfile's Windows persist cannot replace a file another reader holds.
+    let staged = staging
+        .into_temp_path()
+        .keep()
+        .map_err(|error| with_path(path, error.error))?;
+    if let Err(error) = std::fs::rename(&staged, &target) {
+        if let Err(left) = std::fs::remove_file(&staged) {
+            log::warn!("files: the staged copy {} stays: {left}", staged.display());
+        }
+        return Err(with_path(path, error));
+    }
+    log::info!("files: saved revision {revision} to {}", path.display());
+    Fingerprint::of(&target)
+}
+
+/// The access-control entries of an existing target (macOS).
+#[cfg(target_os = "macos")]
+fn copy_acl(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    const COPYFILE_ACL: u32 = 1 << 0;
+    let cstring = |path: &Path| {
+        std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "the path holds a NUL"))
+    };
+    let (from, to) = (cstring(from)?, cstring(to)?);
+    if unsafe {
+        libc::copyfile(
+            from.as_ptr(),
+            to.as_ptr(),
+            std::ptr::null_mut(),
+            COPYFILE_ACL,
+        )
+    } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_acl(_: &Path, _: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+/// Non-atomic targets keep the previous file aside (§6.1).
+pub fn save_with_backup(
+    path: &Path,
+    bytes: &[u8],
+    revision: u64,
+) -> io::Result<(Fingerprint, Option<PathBuf>)> {
+    let backup = if path.try_exists().map_err(|e| with_path(path, e))? {
+        let (name, mut file) = fresh_backup(path)?;
+        let mut source = std::fs::File::open(path).map_err(|e| with_path(path, e))?;
+        io::copy(&mut source, &mut file).map_err(|e| with_path(&name, e))?;
+        file.sync_all().map_err(|e| with_path(&name, e))?;
+        log::info!("files: the previous file stays at {}", name.display());
+        Some(name)
+    } else {
+        None
+    };
+    let written = save_atomic(path, bytes, revision)?;
+    Ok((written, backup))
+}
+
+/// An exclusive fresh backup file with the source's access limits.
+fn fresh_backup(path: &Path) -> io::Result<(PathBuf, std::fs::File)> {
+    let name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} has no file name", path.display()),
+        )
+    })?;
+    for n in 0u32.. {
+        let suffix = if n == 0 {
+            ".bak".to_string()
+        } else {
+            format!("-{n}.bak")
+        };
+        let candidate = parent_dir(path).join(with_suffix(&name.to_string_lossy(), &suffix));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                let meta = std::fs::metadata(path).map_err(|e| with_path(path, e))?;
+                file.set_permissions(meta.permissions())
+                    .map_err(|e| with_path(&candidate, e))?;
+                copy_acl(path, &candidate).map_err(|e| with_path(&candidate, e))?;
+                return Ok((candidate, file));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(with_path(&candidate, error)),
+        }
+    }
+    unreachable!("u32 backup names never run out")
+}
+
+/// An export never overwrites the session's file (FILE-06).
+pub fn export(
+    path: &Path,
+    session: Option<&Path>,
+    bytes: &[u8],
+    revision: u64,
+) -> io::Result<Fingerprint> {
+    if let Some(open) = session
+        && same_file(open, path)?
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("export would overwrite the open file {}", path.display()),
+        ));
+    }
+    log::info!("files: exported revision {revision} to {}", path.display());
+    save_atomic(path, bytes, revision)
+}
+
+/// The canonical form of a possibly missing path.
+fn resolved(path: &Path) -> io::Result<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(real) => Ok(real),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let name = path.file_name().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("{} has no file name", path.display()),
+                )
+            })?;
+            Ok(std::fs::canonicalize(parent_dir(path))?.join(name))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether two paths name one file, links resolved.
+pub fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
+    if crate::same_name(&resolved(a)?, &resolved(b)?)? {
+        return Ok(true);
+    }
+    // A missing side is another file.
+    if let (Ok(Some(ia)), Ok(Some(ib))) = (crate::session::file_id(a), crate::session::file_id(b)) {
+        return Ok(ia == ib);
+    }
+    Ok(false)
+}
+
+/// Why a save did not land (FILE-05).
+#[derive(Debug)]
+pub enum SaveError {
+    Conflict,
+    Refused(SaveState),
+    Io(io::Error),
+}
+
+/// What a completed save left behind.
+pub struct Saved {
+    pub path: PathBuf,
+    pub written: Fingerprint,
+    /// Some on non-atomic volumes; the previous file lives there.
+    pub backup: Option<PathBuf>,
+}
+
+/// Whether the target's volume replaces files atomically (§6.1).
+pub fn atomic_capable(path: &Path) -> io::Result<bool> {
+    capable(parent_dir(path))
+}
+
+#[cfg(unix)]
+fn statfs(dir: &Path) -> io::Result<libc::statfs> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(dir.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "the path holds a NUL"))?;
+    let mut stats: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(path.as_ptr(), &mut stats) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(stats)
+}
+
+#[cfg(target_os = "macos")]
+fn capable(dir: &Path) -> io::Result<bool> {
+    const MNT_LOCAL: i32 = 0x0000_1000;
+    Ok(statfs(dir)?.f_flags as i32 & MNT_LOCAL != 0)
+}
+
+#[cfg(target_os = "linux")]
+fn capable(dir: &Path) -> io::Result<bool> {
+    const NFS: i64 = 0x6969;
+    const SMB: i64 = 0x517B;
+    const CIFS: i64 = 0xFF534D42;
+    Ok(!matches!(statfs(dir)?.f_type, NFS | SMB | CIFS))
+}
+
+#[cfg(windows)]
+fn capable(dir: &Path) -> io::Result<bool> {
+    use std::path::Component;
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+    const DRIVE_REMOTE: u32 = 4;
+    let root = match dir.components().next() {
+        Some(Component::Prefix(prefix)) => prefix.as_os_str().to_string_lossy().into_owned() + "\\",
+        _ => "\\".to_string(),
+    };
+    let wide: Vec<u16> = root.encode_utf16().chain(Some(0)).collect();
+    Ok(unsafe { GetDriveTypeW(wide.as_ptr()) } != DRIVE_REMOTE)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn capable(_: &Path) -> io::Result<bool> {
+    Ok(true)
+}
+
+/// Takes every target or none; a file there already refuses.
+pub fn claim_all(paths: &[PathBuf]) -> io::Result<Vec<std::fs::File>> {
+    let mut taken = Vec::new();
+    for path in paths {
+        // A new file only: never a link someone left.
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(file) => taken.push(file),
+            Err(error) => {
+                paths[..taken.len()]
+                    .iter()
+                    .try_for_each(std::fs::remove_file)?;
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                );
+                return Err(io::Error::new(error.kind(), name));
+            }
+        }
+    }
+    Ok(taken)
+}

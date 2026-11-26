@@ -1,0 +1,483 @@
+//! The shell document apps share (§6), over any engine.
+
+pub mod chart;
+mod autosave;
+mod chrome;
+mod close;
+mod dialogs;
+pub mod engine;
+pub mod files;
+mod find;
+pub mod follow;
+mod front;
+mod hold;
+mod links;
+pub mod lok;
+pub mod menu;
+pub mod moving;
+mod open;
+mod recover;
+pub mod resident;
+pub mod remote;
+pub mod panel;
+mod save;
+pub mod shared;
+mod stopped;
+mod undo;
+mod zoom;
+
+use std::{
+    io,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+
+use ely_files::{SaveState, Session};
+use ely_gpui_component::primitives::Severity;
+use ely_platform::AppId;
+use ely_ui::Root;
+use gpui::{
+    App, AppContext as _, Context, Entity, FocusHandle, SharedString, TaskExt as _, WeakEntity,
+    Window,
+};
+
+pub use autosave::Autosaving;
+pub use chrome::{Chrome, ShowRisk};
+pub use close::{After, Closing};
+pub use dialogs::{Dialog, Dialogs, cancel};
+pub use engine::{Engine, Load, Stop};
+pub use find::{FindReplace, Finder, Finding};
+pub use follow::Following;
+pub use links::{Linked, Linking, Links, UpdateLinks};
+pub use lok::{Commands, Lok, start, take_engine};
+pub use open::{Opening, Source};
+pub use recover::{Keeping, Recovering};
+pub use remote::Remote;
+pub use stopped::{Stopped, Stopping};
+pub use save::{Saving, folder};
+pub use undo::{Redo, Undo, Undoing, bind_undo_keys, undo_able, undo_items};
+pub use zoom::{ActualSize, ZoomIn, ZoomOut, Zooming, bind_zoom_keys, zoom_items};
+
+/// Every shared trait, for `use ely_office::prelude::*`.
+pub mod prelude {
+    pub use crate::{Chrome, Closing, Commands, Dialogs, Finding, Following, Host, Linking, Opening, Remote, Saving, Stopping, Tabs, Undoing, Zooming};
+}
+
+/// What one app opens and writes.
+pub struct Kind {
+    pub app: AppId,
+    /// Formats a save keeps, as the engine names them.
+    pub kept: &'static [&'static str],
+    /// Formats Save As converts to; the first is the default.
+    pub save_as: &'static [&'static str],
+    /// Extensions that always carry macros; None for macro-free formats.
+    pub macros: Option<&'static [&'static str]>,
+}
+
+/// An app built on the shared shell.
+pub trait Host: Sized + 'static {
+    /// What the app keeps per tab.
+    type Extra: Default;
+    type Engine: Engine;
+    const KIND: Kind;
+    fn core(&self) -> &Core<Self>;
+    fn core_mut(&mut self) -> &mut Core<Self>;
+    /// Runs when the kernel reports on tab `id`.
+    fn observed(&mut self, id: u64, view: &Entity<View<Self>>, cx: &mut Context<Self>);
+    /// Runs after a loaded tab joins the window.
+    fn tab_opened(&mut self, _id: u64, _: &mut Context<Self>) {}
+    /// Runs before a search first moves the cursor.
+    fn search_leaves(&mut self, _: &mut Context<Self>) {}
+    /// Runs as a quit starts, before any tab closes.
+    fn quitting(&mut self, _: &mut Context<Self>) {}
+    /// Runs when a close stops: question or save cancelled.
+    fn close_cancelled(&mut self, _: &mut Context<Self>) {}
+    /// An outside change met a save; true if shown.
+    fn conflicted(&mut self, _id: u64, _: &mut Context<Self>) -> bool {
+        false
+    }
+    /// Runs as tab `tab` leaves, saved, clean or discarded.
+    fn tab_closed(&mut self, _tab: &Tab<Self::Extra, Self::Engine>, _: &mut Context<Self>) {}
+    /// Runs when tab `id` comes to the front.
+    fn tab_shown(&mut self, _id: u64, _: &mut Context<Self>) {}
+    /// Tab `id` is leaving: keep its window state in it.
+    fn tab_leaving(&mut self, _id: u64, _: &mut Context<Self>) {}
+    /// The app's own question about tab `id` is open.
+    fn asks_about(&self, _id: u64) -> bool {
+        false
+    }
+
+    /// Tab `tab`'s document as last seen; reads and numbered commands.
+    fn read_at(&self, _tab: u64, _cx: &App) -> Option<<Self::Engine as Engine>::Doc> {
+        None
+    }
+}
+
+/// The view type of host `H`'s engine.
+pub type View<H> = <<H as Host>::Engine as Engine>::View;
+/// The worker type of host `H`'s engine.
+pub type WorkerOf<H> = <<H as Host>::Engine as Engine>::Worker;
+/// The document type of host `H`'s engine.
+pub type DocOf<H> = <<H as Host>::Engine as Engine>::Doc;
+
+/// Why saving in place would lose something.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Risk {
+    /// Macros Ely will not round-trip (LOK-11).
+    Macros,
+    /// Signatures an edit breaks (§11.4).
+    Signed,
+    /// A damaged file opened through a repaired copy (PDF-14).
+    Repaired,
+    /// PPTX slide sections the kernel drops (D-02).
+    Sections,
+    /// An encrypted PPTX whose sections Ely cannot see.
+    Sealed,
+    /// DOCX links of kinds the kernel keeps as pictures.
+    Links,
+    /// Linked sections DOCX would save as text (0091).
+    Unkept,
+}
+
+/// One open document.
+pub struct Tab<E, G: Engine> {
+    pub id: u64,
+    pub view: Entity<G::View>,
+    pub doc: G::Doc,
+    pub session: Session,
+    /// Its id in the same-file registry; untitled tabs have none.
+    pub registry: Option<usize>,
+    pub name: SharedString,
+    /// The kernel says it is modified.
+    pub modified: bool,
+    /// Why Save writes a copy, if it does.
+    pub risk: Option<Risk>,
+    /// Other files it reads (LOK-11).
+    pub links: Links,
+    pub work: PathBuf,
+    /// A save's export runs in the background.
+    pub exporting: bool,
+    /// Saves waiting for a typing pause.
+    pub pausing: usize,
+    /// Reopen from the file once memory matches it.
+    pub reopen: bool,
+    pub extra: E,
+    /// The host's watch on its view; a move remakes it.
+    pub watching: Vec<gpui::Subscription>,
+    /// Held by work running for it; a held tab stays.
+    pub busy: std::rc::Rc<()>,
+}
+
+impl<E, G: Engine> Tab<E, G> {
+    pub fn dirty(&self, cx: &App) -> bool {
+        self.modified
+            || self.session.state() != SaveState::Saved
+            || G::edit_pending(self.view.read(cx))
+    }
+
+    /// The status line for this tab (FILE-02).
+    pub fn state_key(&self, cx: &App) -> &'static str {
+        match self.session.state() {
+            _ if self.risk == Some(Risk::Macros) => "office.state.risk",
+            _ if self.risk == Some(Risk::Signed) => "office.state.signed",
+            _ if self.risk == Some(Risk::Repaired) => "office.state.repaired",
+            _ if self.risk == Some(Risk::Sections) => "office.state.sections",
+            _ if self.risk == Some(Risk::Sealed) => "office.state.sealed",
+            _ if self.risk == Some(Risk::Links) => "office.state.unlinked",
+            _ if self.risk == Some(Risk::Unkept) => "office.state.unkept",
+            _ if self.exporting || self.pausing > 0 => "office.state.saving",
+            SaveState::Saving => "office.state.saving",
+            SaveState::ExternalModified => "office.state.external",
+            SaveState::SaveFailed => "office.state.failed",
+            _ if self.dirty(cx) => "office.state.dirty",
+            _ => "office.state.saved",
+        }
+    }
+}
+
+/// A continuation run once a tab's input lands.
+pub type Waiting<H> = Box<dyn FnOnce(&mut H, &mut Window, &mut Context<H>)>;
+
+/// The shared state of one window.
+pub struct Core<H: Host> {
+    pub worker: Arc<Mutex<WorkerOf<H>>>,
+    /// What every window of the app shares.
+    pub shared: shared::Handle<H>,
+    pub tabs: Vec<Tab<H::Extra, H::Engine>>,
+    /// Written by `set_active`, a front load or a close.
+    active: Option<u64>,
+    /// The tab last brought to the front.
+    shown: Option<u64>,
+    /// Loads in flight: tab id, name and session.
+    pub loading: Vec<(u64, SharedString, Option<usize>)>,
+    /// The newest load asked; only it takes the front.
+    front: Option<u64>,
+    /// Loads waiting until their tab is shown.
+    park: front::Parking<H>,
+    /// Keys typed into a loading tab.
+    hold: Entity<hold::Hold>,
+    pub focus: FocusHandle,
+    pub root: WeakEntity<Root>,
+    pub dialog: Option<Dialog>,
+    /// Locked files waiting: path, a password failed, a copy.
+    pub locked: std::collections::VecDeque<(PathBuf, bool, bool)>,
+    /// The window that async results update.
+    pub window: Option<gpui::AnyWindowHandle>,
+    /// Work that waits for a tab's queued input.
+    pub waiting: Vec<(u64, Waiting<H>)>,
+    /// Saves that wait for a tab's running export.
+    pub queued_saves: Vec<(u64, Waiting<H>)>,
+    /// The open find box.
+    pub finder: Option<Finder>,
+    /// The tab menu asked for, while it shows.
+    pub tab_offer: Option<ely_ui::menu::Offer<()>>,
+    /// This window owes a recovery round, once typing rests.
+    pub owed: bool,
+    /// Edit counts at the last beat, per tab.
+    pub quiet: std::collections::HashMap<u64, u64>,
+    /// Other programs' saves, answered as each ends.
+    pub saving: Vec<(u64, ely_ui::Ask)>,
+    /// Other programs' saves waiting for a typing pause.
+    pub asked: Vec<(u64, ely_ui::Ask)>,
+}
+
+impl<H: Host> Core<H> {
+    /// The app's first window; `stop` comes before sharing.
+    pub fn new(worker: Arc<Mutex<WorkerOf<H>>>, stop: Option<Stop>, work: PathBuf, cx: &mut Context<H>) -> Self {
+        let shared = shared::Handle::first(Arc::clone(&worker), stop, work, cx);
+        Self::with(worker, shared, cx)
+    }
+
+    /// A later window: the first one's engine and records.
+    pub fn joined(cx: &mut Context<H>) -> io::Result<Self> {
+        Ok(Self::join(shared::Handle::joined(cx)?, cx))
+    }
+
+    /// A later window over records already found.
+    pub fn join(shared: shared::Handle<H>, cx: &mut Context<H>) -> Self {
+        let worker = Arc::clone(&shared.get().worker);
+        Self::with(worker, shared, cx)
+    }
+
+    /// Never locks the worker.
+    fn with(worker: Arc<Mutex<WorkerOf<H>>>, shared: shared::Handle<H>, cx: &mut Context<H>) -> Self {
+        cx.observe_self(chrome::follow_front).detach();
+        shared.get_mut().hosts.push(cx.weak_entity());
+        Core {
+            worker,
+            shared,
+            tabs: Vec::new(),
+            active: None,
+            shown: None,
+            loading: Vec::new(),
+            front: None,
+            park: Default::default(),
+            hold: cx.new(hold::Hold::new),
+            focus: cx.focus_handle(),
+            root: WeakEntity::new_invalid(),
+            dialog: None,
+            locked: Default::default(),
+            window: None,
+            waiting: Vec::new(),
+            queued_saves: Vec::new(),
+            finder: None,
+            tab_offer: None,
+            owed: false,
+            quiet: Default::default(),
+            saving: Vec::new(),
+            asked: Vec::new(),
+        }
+    }
+
+    /// The app's scratch root.
+    pub fn work(&self) -> PathBuf {
+        self.shared.get().work.clone()
+    }
+
+    /// The next tab id, unique across the app's windows.
+    pub fn take_id(&self) -> u64 {
+        let mut shared = self.shared.get_mut();
+        shared.next += 1;
+        shared.next - 1
+    }
+
+    /// The id `take_id` gives next.
+    pub fn next_id(&self) -> u64 {
+        self.shared.get().next
+    }
+}
+
+/// An emptied scratch root under an app's data folder.
+pub fn fresh_work(data: &std::path::Path) -> io::Result<PathBuf> {
+    let work = data.join("work");
+    if work.try_exists()? {
+        std::fs::remove_dir_all(&work)?;
+    }
+    std::fs::create_dir_all(&work)?;
+    Ok(work)
+}
+
+/// Runs `f` on the host inside its window.
+pub fn in_window<H: Host, R>(
+    this: &WeakEntity<H>,
+    cx: &mut gpui::AsyncApp,
+    f: impl FnOnce(&mut H, &mut Window, &mut Context<H>) -> R,
+) -> anyhow::Result<R> {
+    let handle = this
+        .read_with(cx, |host, _| host.core().window)?
+        .ok_or_else(|| anyhow::anyhow!("the documents have no window"))?;
+    cx.update_window(handle, |_, window, cx| {
+        this.update(cx, |host, cx| f(host, window, cx))
+    })?
+}
+
+/// Opens the print panel after GPUI releases the app.
+pub fn print_later<H: Tabs>(pdf: std::path::PathBuf, cx: &mut Context<H>) {
+    let sides = ely_ui::settings::current(cx).two_sided;
+    // The panel's modal loop calls back into GPUI.
+    cx.spawn(async move |this, cx| {
+        let printed = ely_platform::print::print_pdf(&pdf, sides).await;
+        // The copy may hold what a password guarded.
+        if let Err(error) = std::fs::remove_file(&pdf) {
+            log::error!("office: the print copy {} stays: {error}", pdf.display());
+        }
+        match printed {
+            Ok(printed) => log::info!("office: print done, printed {printed}"),
+            Err(error) => {
+                if this
+                    .update(cx, |host, cx| host.print_failed(&error.to_string(), cx))
+                    .is_err()
+                {
+                    log::error!("office: printing failed after its window closed: {error}");
+                }
+            }
+        }
+    })
+    .detach();
+}
+
+/// A localized message.
+pub fn text(cx: &App, key: &str, args: &[(&str, &str)]) -> SharedString {
+    ely_ui::i18n::text(cx, key, args)
+}
+
+/// Tabs, toasts and queued input.
+pub trait Tabs: Host {
+    fn tab(&self, id: u64) -> Option<&Tab<Self::Extra, Self::Engine>> {
+        self.core().tabs.iter().find(|tab| tab.id == id)
+    }
+
+    fn tab_mut(&mut self, id: u64) -> Option<&mut Tab<Self::Extra, Self::Engine>> {
+        self.core_mut().tabs.iter_mut().find(|tab| tab.id == id)
+    }
+
+    /// Keeps tab `id` here while work runs for it.
+    fn hold(&self, id: u64) -> Option<std::rc::Rc<()>> {
+        self.tab(id).map(|tab| std::rc::Rc::clone(&tab.busy))
+    }
+
+    fn active_tab(&self) -> Option<&Tab<Self::Extra, Self::Engine>> {
+        self.core().active().and_then(|id| self.tab(id))
+    }
+
+    fn toast(&self, text: SharedString, severity: Severity, cx: &mut App) {
+        log::warn!("{}: {text}", Self::KIND.app.slug());
+        self.toast_unlogged(text, severity, cx);
+    }
+
+    fn print_failed(&self, error: &str, cx: &mut App) {
+        let text = text(cx, "office.print.failed", &[("error", error)]);
+        self.toast(text, Severity::Danger, cx);
+    }
+
+    /// A success toast with a button that opens `path`.
+    fn toast_output(&self, text: SharedString, path: std::path::PathBuf, cx: &mut App) {
+        log::info!("{}: {text}", Self::KIND.app.slug());
+        if let Some(root) = self.core().root.upgrade() {
+            root.update(cx, |root, cx| root.toast_output(text, Severity::Success, path, cx));
+        }
+    }
+
+    /// A toast quoting document text; the caller logs a summary.
+    fn toast_unlogged(&self, text: SharedString, severity: Severity, cx: &mut App) {
+        if let Some(root) = self.core().root.upgrade() {
+            root.update(cx, |root, cx| root.toast(text, severity, cx));
+        }
+    }
+
+    /// A kernel failure as a toast.
+    fn engine_failed(&self, error: &str, cx: &mut App) {
+        let text = text(cx, "office.error.engine", &[("error", error)]);
+        self.toast(text, Severity::Danger, cx);
+    }
+
+    /// Whether every input sent to `id` reached the kernel.
+    fn settled(&self, id: u64, cx: &App) -> bool {
+        self.tab(id)
+            .is_none_or(|tab| Self::Engine::settled(tab.view.read(cx)))
+    }
+
+    /// Runs `then` once the queued input of `id` lands.
+    fn when_settled(
+        &mut self,
+        id: u64,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        log::info!("{}: tab {id} waits for queued input", Self::KIND.app.slug());
+        self.core_mut().waiting.push((id, Box::new(then)));
+    }
+
+    /// Reads tab `id` in the background; `then` gets the window.
+    fn read_in<T: Send + 'static>(
+        &self,
+        id: u64,
+        read: impl FnOnce(&mut WorkerOf<Self>, &DocOf<Self>) -> io::Result<T> + Send + 'static,
+        then: impl FnOnce(&mut Self, io::Result<T>, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab) = self.tab(id) else {
+            return;
+        };
+        let doc = self.read_at(id, cx).unwrap_or_else(|| tab.doc.clone());
+        let worker = Arc::clone(&self.core().worker);
+        let busy = std::rc::Rc::clone(&tab.busy);
+        cx.spawn(async move |this, cx| {
+            let _busy = busy;
+            let read = cx
+                .background_executor()
+                .spawn(async move { ely_lok::behind(&worker, move |worker| read(worker, &doc)).await })
+                .await;
+            in_window(&this, cx, |host, window, cx| then(host, read, window, cx))
+        })
+        .detach_and_log_err(cx);
+    }
+
+    /// A dialog's read; dropped once tab `id` is hidden.
+    fn ask_in<T: Send + 'static>(
+        &self,
+        id: u64,
+        read: impl FnOnce(&mut WorkerOf<Self>, &DocOf<Self>) -> io::Result<T> + Send + 'static,
+        then: impl FnOnce(&mut Self, io::Result<T>, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.read_in(
+            id,
+            read,
+            move |host, read, window, cx| {
+                if host.core().active() != Some(id) {
+                    log::info!(
+                        "{}: tab {id} left; its dialog is dropped",
+                        Self::KIND.app.slug()
+                    );
+                    return;
+                }
+                then(host, read, window, cx)
+            },
+            cx,
+        );
+    }
+}
+
+impl<H: Host> Tabs for H {}
+
+// touch for incremental measurement

@@ -1,0 +1,40 @@
+# 性能记录
+
+`tests/perf/bench.py` 在发行构建上测 PERF-01 至 PERF-08，每项默认 30 次，记 P50 与 P95，写成本目录下的 `<日期>-<机型>.md`。
+
+样本由 `tests/perf/samples.py` 按固定种子生成，放在 `engines/bench`（不入库），记录里写每个样本的 SHA-256（仓库写 HEAD）：
+
+| 样本 | 内容 | 用于 |
+| --- | --- | --- |
+| doc.docx | 100 页，20 张图片，约 9 MB | PERF-03 |
+| sheet.xlsx | 10 万个数值，1 万个 `SUM` 公式 | PERF-04（载入即重算，重算计在打开之内） |
+| pages.pdf | 1000 页，每页一张图，约 200 MB | PERF-05 |
+| repo | 10 万个提交 | PERF-06 |
+| notes.md | 1 MB | PERF-07 |
+
+`tests/perf/bench.py` 在 macOS、Windows 上直接跑，Linux 经 `tests/perf/linux.sh`（容器里的 Xvfb、私有 AT-SPI 总线）；各平台的进程与输入在 `drive.py`（macOS 经 AX 与 CGEvent，Windows 经 `drive.ps1` 的 UI Automation，Linux 经 `atspi.py` 与 XTest），Windows 上每次按键与点击前核对前台是本应用的窗口，不是即取回，取不回即失败、从不把键送进别的程序；应用窗口的输入法不是美式键盘即先切换并读回核对（拼音会把字母拿去组字），驱动的辅助进程不开控制台窗口。子进程的输出一律经 `child.py` 按 UTF-8 严格解码，解不开即失败并点名哪条命令；PowerShell 先把输出编码设为 UTF-8（默认是控制台代码页）。应用的日志按字节读，严格解到最后一个换行，截在半个字符处的末尾留待下次读；`idle.py` 只读各应用 `lok-profile/idle.lock` 的持锁进程（Linux、macOS 以 F_GETLK，Windows 以 Restart Manager），别的进程的命令行从不读；持锁者的 argv 严格解码后须是 `ely-lok-worker`、带该数据根下这个应用的配置目录与 `--idle idle-<应用>-…`，不符即失败并点名 pid。macOS 上每个窗口后读 `pmset -g log`：窗口里有名字不以 `ely-` 起头的进程建或放 PreventUserIdle* 断言（别的程序起停，WindowServer 因此叫醒每个 AppKit 进程），该窗口作废、不判，打印证据并重量，三个窗口都废即失败；判的窗口照旧 0 CPU（R20.107）。PERF-02 用另一份带 `ely-ui/frames`（gpui 的事件日志）的发行构建，其余各项用用户拿到的发行构建。应用日志的时间戳到毫秒。
+
+PERF-01、03、04、05、07 从启动进程计时，到日志里出现标记为止（脚本每 10 毫秒读一次日志）：PERF-01 到首帧（`ELY_SMOKE=1` 打印 `ready`），首次运行（新的用户目录）与日常启动分记，每次等上一次的进程（含仍在启动的内核）退出后再测；Doc、Table、Show 另记空白文档就绪（`opened Untitled`），它要等内核启动；PERF-03、04 到第一块图块真正画到窗口上（`lok: first tile drawn`，在 `paint_image` 成功之后记；其间内核画图块失败或窗口画图块失败即整次作废），PERF-03 之前先核对样本经内核排版恰为 100 页（`lok: 100 pages`）；PERF-05 到第一页的第一块画到窗口上（`pdf: first tile drawn, page 0`）；PERF-07 到可视模式可以键入（`mark: shown as "visual"`）。内存为应用及其全部子进程（内核 worker）的 RSS 之和（表头“Resident MB”，2026-11-20 前叫“Total memory MB”，同一量），任一进程读不到即整次作废。PERF-07 另有内存预算 400 MB（H-02，`BUDGETS`）。
+
+PERF-02（`feedback.py`）七个应用各按 30 键，每键须各有一条反馈，缺即失败：Doc、Table、Show 为按键到第一个显示该编辑的整屏（`lok: edit <序号> text|key to tile`，每个编辑一条；从未画出的记 `never drawn` 及原因，键入的键出现即失败；Show 先以 Tab、Enter 进入第一个文本框），PDF（1000 页样本上按 PageDown）、Mark、Tree、Mail 为按键到其后第一帧画出（`ui: key_down to frame`，取自 gpui 事件日志：按键派发之始到呈现之末）；并以 `ELY_STALLS=1` 记主线程连续忙于 100 毫秒以上的次数：20 毫秒的计时器迟到过 100 毫秒时，看主线程其间用了多少 CPU、等 CPU 等了多久（Linux 的 `/proc/thread-self/schedstat` 第二栏）：用过 100 毫秒为忙（`the main thread was busy`），等 CPU 占了迟到的一半以上才是饿（`starved`，机器缺 CPU，另列一行、只列不判），其余为堵（`blocked`，等锁、等内核之类）；macOS、Windows 无每线程的等待时间，CPU 不足的迟到一律记作 `held`；忙、堵、`held` 都计入卡顿
+
+PERF-06（`search.py`）从驱动送出输入的时刻（驱动打印的墙上时间）计到应用日志里结果那一行的时间戳，驱动进程的启动与返回不计：ElyTree 在 10 万提交的仓库上按“历史”到首屏（`history shows`），按回车到查询结果（`searched true`）；ElyMail 在引擎写入的 10 万封已索引邮件上，于搜索框键入常见词 `report`，从最后一键到结果列表（`shows N messages, searched true`，含停手 200 毫秒的等待）。
+
+PERF-08（`cycles.py`）七个应用各开关 300 次：Doc、Table、Show 以快捷键新建再关闭；PDF、Mark 由第二个进程把文件交给正在运行的那份再关闭；Tree 同样交一个仓库；Mail 新建一封再丢弃。先开关一次预热（第一个窗口或文档让系统一次性载入线程池、ETW 登记、ALPC 端口等，Windows 上 ElyMail 首个写信窗口即多出约 25 个，此后 40 轮持平），之后才取基线。每次关闭后等活的文档数回到基线（标签数 `tabs open`、内核 `lok-worker: N documents open`、`pdf-worker: … N documents open`、仓库数 `repositories open`、窗口数 `a window closed, N open`），等不到即失败。句柄：macOS、Linux 按身份比对，比基线多出的只许是系统的只读资源且此后每次都相同；Windows 只能计数，最后四分之一轮的最小值不得高于前一个四分之一轮的最大值（到末尾仍在增长即失败；开头的预热可以增长），也不得比基线多出 12 个以上（线程池的增减；8 核虚拟机上实测摆到 +11）。内存按私有内存计、换出的也算（`drive.py` 的 `private`：Linux 为 RssAnon 加 VmSwap，macOS 为 `proc_pid_rusage` 的 phys_footprint，Windows 为 PagefileUsage 即私有提交），驻留的 RSS 会因换出而跌、看不出增长；2026-11-20 前的 PERF-08 记的是 RSS 之和，与此后的数不可直比。内存只看是否收敛（同上，且最后两个四分之一轮中位数之差每轮超过一页 4 KB 才算仍在增长），不设留存上限：glibc 每个线程的 malloc 区域留下已释放的内存备用，留多少随核数而定，不是泄漏（Linux 上 ElyPDF 约 40 轮内多出 55 MB 后持平，对比 /proc/pid/smaps 见增量全在约 23 个线程区域各 2 MB；ElyDoc 约 80 轮内由 387 MB 升到 396 MB 后持平，ElyMark 在第 50 至 150 轮之间一次升约 20 MB 后持平，开关 600 次仍持平，150 轮时这一步偶尔还没走完，故用 300 轮）。记录写出留存的量。记录写基线与每次的内存、句柄数与活的文档数。
+
+记录开头的 JSON 写机型、CPU、核数、内存、GPU、系统、系统字体文件数、各应用发行二进制的散列与样本散列。冷启动未清系统文件缓存（需要管理员权限），“日常启动”即文件缓存已热时的启动。
+
+记录开头的 JSON 另写版本。写完后与同一台机器的上一份比：P50 或 P95 慢过三成且多出 10 毫秒的各项列在末尾“Slower than the last record by over 30%:”一节，每行以“— ”结尾，等人写上原因。`tests/perf/baseline.py <记录>` 可随时重列；上一份有而这一份没有的项也列在那里（写作“→ none”），同样要写原因。PERF-02 的卡顿与饿死计时器两行按次数比：键去掉行名末的“: N times”，次数不升即过，升了写作“- 项: 旧 → 新 times — ”，要原因；两份都有时 P50、P95 照上面的常规比；缺了写作“- 项: 旧 → none times — ”，只这一行。一项列出几行时，每行都要原因。`baseline.py --check <版本> <macos|windows|linux>` 是发布的门（`scripts/ci.sh` 调用）：没有这一版在本系统的基准记录与 `firsts.py install` 的装后首开记录（Windows 另要 `firsts.py reboot` 的重启后首开；0.1.17 的 macOS、Linux 另有用户定的例外，见 decisions 2026-11-20），或有哪一行原因空着，即失败。带 `--only` 或只跑部分应用的运行是局部记录：JSON 里记 `partial`，文件名以 `-partial` 结尾，不覆盖当天的全量记录，门与比较都不认它。每项测完在输出里打一行 `bench: case <项> from <UTC> to <UTC>`，换页按这段时间判；各项的准备（首次启动、邮件灌库）在这段之外。bench 在跑它的机器上自己每秒取样、以 UTC 记时：Linux 记 `vmstat`，macOS 读 `vm_stat` 的 Swapins、Swapouts（Pageouts 只记不判），Windows 经 PDH 的英文计数器读 `\Memory\Pages Output`（读入的页只记不判，换入不可测）；跑完以 `tests/perf/judge.py` 逐项判：窗口里有换出、或换入平均达 100 KiB/s 的项记入 JSON 的 `void`（Windows 只判换出），bench 以非零退出；`--redo` 重跑后从中去掉；`baseline.py --check` 见 `void` 非空即失败。取样记录另存在 `--keep` 旁（`.vmstat` 或 `.paging`）。有项作废或运行失败时，取样记录与各项原始结果一定留下：给了 `--keep` 即在其旁，没给即在 `--out` 旁的 `bench-kept/<UTC 时刻>.json` 与同名前缀的取样记录（默认 `docs/bench-kept/`，不入库），路径打在退出的那一行；全都作数又没给 `--keep` 的运行不留。取样器起不来（起了却给不出取样）也算失败，起了一半的先停掉（停不了的错只记在原错上）、已有的取样照留；失败时每一步（选路径、复制诊断日志、停取样、抄取样、写原始结果）各自接住，错打出并记在原错上，抛的总是原错；取样与原始结果确实都写下了，才打出它们的路径；有一样没写下（留证据的文件夹建不出、`--keep` 的文件夹不在，或重跑的结果并不回那份记录），即打出缺了哪样与工作目录，工作目录留着不删。`judge.py <bench 的输出> <vmstat 记录> […] [--record 记录]` 判 Linux 上在外面记的：几对依次给（全量在前、重跑在后），同一项以后跑的为准，`--record` 把作废的项写进那份记录的 `void`。`--keep 文件` 另存各项的原始结果；`--redo 项…` 只重跑点名的项，并回 `--keep` 的那份记录：日期仍是首次全量的，构建、样本与机器不同即拒，JSON 的 `rerun` 记每项重跑的时刻。
+
+`tests/perf/folder-search.rs` 单独测 ElyMark 文件夹搜索的内存部分（不含读盘与界面），新旧实现成对计时并逐条核对结果；方法与结果见 `2026-10-23-folder-search.md`。
+
+PERF-10（`load.py`，样本见 `loadfiles.py`）Doc、Table、Show、Mark 依次各开 N 份（`--docs`，默认 100）：N−1 份随启动打开，每十份一份大的（`--big-every`，1 即每份都大，连打字的那份前台文档也是；Doc 为 PERF-03 的 100 页样本，Table 为 2 万行带长依赖链、数组公式、定义名称、`SUMIFS`、`INDEX`/`MATCH`、`SUMPRODUCT` 等与外部工作簿 source.xlsx 引用的工作簿，Show 为 45 张带图的幻灯片，Mark 为 1 MB），Doc 每十份另有一份带 INCLUDETEXT、链接的图片与 OLE 链接（LINK 域）的文档，其余为小文档；链接的源在打开前已改过（缓存值旧于源）。全部样本由 Python 直接写 OOXML，不经 Microsoft Office。第 N 份经第二个进程交给运行中的那份（“再开一份”计时），成为前台文档。前台先空闲按 `--keys` 键，再在全部文档（连前台正在打字的那份，R18.29）同时经命令行（`text replace`，Table 为 `cell set` 改 H1 与所有公式所依的 A1）编辑 `--rounds` 轮期间按键不停，直到编辑结束；每键须有反馈（照 PERF-02：Doc、Table、Show 到图块，Mark 到帧），10 秒无反馈即该应用整次作废。之后同时经命令行保存全部 N 份，读盘核对：每份的编辑都在（Table 另核对依 A1 的公式值已重算且公式仍在），前台键入的每个字都在，大工作簿的外部引用与链接文档的三种链接仍在，显示的仍是文件里保存的值（无人点“更新链接”，LOK-11）。记录写打开全部、再开一份、内存（开好后与编辑保存后）、两段按键的 P50/P95/最大、帧（超过 8.3 毫秒的帧数、各 2 秒窗口里“弄脏到呈现”P95 的最大值与最大值）、主线程停顿、命令行编辑与保存的往返（含起进程），以及全部问题；有问题即以非零退出。
+
+`pdfs.py` 是 PERF-10 的 ElyPDF 一项：N 份（`--docs`，默认 20）各 1000 页的 PDF（PERF-05 的样本，各一份副本：硬链接在 ElyPDF 里是同一份文件）随启动打开，翻前台那份 `--keys` 页，再逐个切到其余各份（把文件再交给应用：滚出标签栏的标签按不到）、各翻一页；每份都经“页面›插入空白页”加一页、保存、读盘核对页数。每键须到帧，worker 须持有全部 N 份。记打开全部、内存、两段按键与主线程停顿，写 `<日期>-<机型>-pdf-load-N.md`。
+
+Linux 上两个工具都经 `ELY_PERF_TOOL=load.py`（或 `pdfs.py`）`tests/perf/linux.sh` 跑；几个应用要同时跑时各起一份，各给一个显示号（`ELY_PERF_DISPLAY`），各写各的记录。
+
+PERF-10 的数据根取短路径（`.work/L…`、`.work/E…`）：没有补丁 0080（R15.33）的内核，配置目录路径 149 至约 162 个字符时 worker 启动即中止，工具在超过 140 字符时拒绝运行。有人点击或挪动应用窗口（日志里非工具发出的 `mouse_down`，或设置里存的窗口位置变了）即作废该应用这一次，30 秒后重来，至多三次。
+
+`extreme.py` 逐项实测 PERF-10 的极端情形，每项一行：通过与否与实测值。链接源缺失：打开、键入、保存后链接仍在；源已改：外部引用与 INCLUDETEXT 打开时显示保存的值，点“更新链接”才读源，源再存后仍等用户再点，存下的文件里链接仍在；链接图片与 OLE 预览在各步截屏（`links-*.png`）留看；三份切换：每次切标签后先按一键看是否仍落在文档里，落不进即像用户那样点回页面，同时经命令行编辑三份，最后核对每份的键与编辑；键入中保存：每半秒经命令行保存一次，最后读盘核对每个键；关闭未保存：Ctrl+W 须询问，Esc 留下文档与键，再 Ctrl+W 选保存即写盘（ElyMark 随写随存，直接关闭，核对磁盘）；杀引擎：键入、编辑、等过一个恢复点后再键入 5 键，杀掉 worker，须提示并经“重新打开文档”从最新恢复点开回（有改动的标签照 2026-10-08 的决定开成未命名副本），读恢复点核对内容；缩放：25%、67%、125%、400% 与滚轮，图块不得失败，截图留看（ElyTable 截前按 Ctrl+Home 看 A1 的选区框）；快速开关：20 份同时交来再 20 次 Ctrl+W，三轮，记时间与内存；超大文件：打开、20 键、命令行编辑、保存、读盘。
+

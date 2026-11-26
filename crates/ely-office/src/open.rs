@@ -1,0 +1,499 @@
+//! Opening user files and copies over one worker (FILE-03).
+
+use std::{
+    io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use ely_files::{Open, Session};
+use gpui::{AppContext as _, Context, Entity, Subscription, TaskExt as _, Window};
+
+use crate::engine::{Engine, Load};
+use crate::files::{self, file_name};
+use crate::{Host, Tab, Tabs, View, in_window, text};
+
+/// How host `H`'s engine reads text files.
+type ImportOf<H> = <<H as Host>::Engine as Engine>::Import;
+
+/// What a load starts from.
+pub enum Source<I> {
+    /// A user file under its registry id, with its password.
+    File(PathBuf, usize, String),
+    /// A template copy; the result is untitled.
+    Copy(PathBuf),
+    /// A copy that needed a password, with the one given.
+    Locked(PathBuf, String),
+    /// Checked text bytes, where they go, how to read.
+    Import(PathBuf, Arc<Vec<u8>>, I),
+}
+
+/// A load read off the window: risk, links, session.
+type Prepared<L> = (L, Option<crate::Risk>, crate::Links, Option<(PathBuf, Session)>);
+
+pub trait Opening: Host {
+    /// An untitled copy of a local template.
+    fn new_from_file(&mut self, template: &Path, cx: &mut Context<Self>) {
+        let name = file_name(template);
+        let copy = files::work_dir(&self.core().work(), self.core().next_id()).and_then(|dir| {
+            let copy = dir.join(name.as_ref());
+            std::fs::copy(template, &copy)?;
+            Ok(copy)
+        });
+        match copy {
+            Ok(copy) => self.load(Source::Copy(copy), cx),
+            Err(error) => self.failed_open(&name, &error, cx),
+        }
+    }
+
+    /// A new document from checked text bytes named `name`.
+    fn import_text(
+        &mut self,
+        name: &str,
+        bytes: Arc<Vec<u8>>,
+        how: ImportOf<Self>,
+        cx: &mut Context<Self>,
+    ) {
+        match files::work_dir(&self.core().work(), self.core().next_id()) {
+            Ok(dir) => self.load(Source::Import(dir.join(name), bytes, how), cx),
+            Err(error) => self.failed_open(name, &error, cx),
+        }
+    }
+
+    /// An untitled document from `contents` named `name`.
+    fn new_from_text(&mut self, name: &str, contents: &str, cx: &mut Context<Self>) {
+        let copy = files::work_dir(&self.core().work(), self.core().next_id()).and_then(|dir| {
+            let copy = dir.join(name);
+            std::fs::write(&copy, contents)?;
+            Ok(copy)
+        });
+        match copy {
+            Ok(copy) => self.load(Source::Copy(copy), cx),
+            Err(error) => self.failed_open(name, &error, cx),
+        }
+    }
+
+    /// Opens a user file; an open one gets focus (FILE-03).
+    fn open_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.open_with(path, String::new(), cx);
+    }
+
+    /// Opens a user file with its password.
+    fn open_with(&mut self, path: PathBuf, password: String, cx: &mut Context<Self>) {
+        // A Save As writing there owns the file already.
+        if let Some(id) = crate::save::writer(&self.core().tabs, &path) {
+            log::info!("{}: tab {id} is saving as the file asked; it takes focus", Self::KIND.app.slug());
+            self.core_mut().active = Some(id);
+            return cx.notify();
+        }
+        let opened = self.core().shared.get_mut().sessions.open(&path, false);
+        match opened {
+            Ok(Open::Focus(registry)) => {
+                if self.show_registered(registry, cx) {
+                    return;
+                }
+                // Another window holds it: that window comes forward.
+                let me = cx.entity_id();
+                let shown = self.core().shared.hosts().into_iter().filter(|host| host.entity_id() != me).find_map(|host| {
+                    let window = host.read(cx).core().window;
+                    host.update(cx, |host, cx| host.show_registered(registry, cx)).then_some(window).flatten()
+                });
+                let Some(window) = shown else {
+                    return log::error!("{}: file {registry} is registered, but no window holds it", Self::KIND.app.slug());
+                };
+                cx.defer(move |cx| {
+                    if let Err(error) = window.update(cx, |_, window, _| window.activate_window()) {
+                        log::warn!("office: the window holding the file is gone: {error}");
+                    }
+                });
+            }
+            Ok(Open::Fresh(registry) | Open::View(registry)) => {
+                self.load(Source::File(path, registry, password), cx)
+            }
+            Err(error) => self.failed_open(&path.display().to_string(), &error, cx),
+        }
+    }
+
+    /// Picks registered file `registry` here, if this window holds it.
+    fn show_registered(&mut self, registry: usize, cx: &mut Context<Self>) -> bool {
+        let core = self.core_mut();
+        let open = core.tabs.iter().find(|tab| tab.registry == Some(registry)).map(|tab| tab.id);
+        // Still loading: chosen as its loading tab is.
+        let Some(chosen) = open.or_else(|| core.loading.iter().find(|(.., of)| *of == Some(registry)).map(|(id, ..)| *id)) else {
+            return false;
+        };
+        core.set_active(Some(chosen));
+        if let Some(id) = open {
+            self.focus_later(id, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    /// Gives tab `id` the keys once the window is free.
+    fn focus_later(&self, id: u64, cx: &mut Context<Self>) {
+        let Some(handle) = self.core().window else {
+            return log::warn!("{}: no window to focus tab {id} in", Self::KIND.app.slug());
+        };
+        let host = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            let Some(host) = host.upgrade() else { return };
+            let Some(focus) = host.read(cx).tab(id).map(|tab| Self::Engine::focus(tab.view.read(cx))) else { return };
+            if let Err(error) = handle.update(cx, |_, window, cx| window.focus(&focus, cx)) {
+                log::warn!("{}: tab {id} kept no focus: {error}", Self::KIND.app.slug());
+            }
+        });
+    }
+
+    fn failed_open(&self, name: &str, error: &io::Error, cx: &mut gpui::App) {
+        log::error!("{}: a file did not open: {}", Self::KIND.app.slug(), ely_ipc::Worded::logged(error));
+        ely_platform::startup::document_shown("the file did not open");
+        cx.refresh_windows();
+        let inner = error.get_ref();
+        let error = match inner.and_then(|inner| inner.downcast_ref::<files::NotPackage>()) {
+            Some(files::NotPackage(ext)) => text(cx, "office.error.not_package", &[("ext", ext)]).to_string(),
+            None if inner.is_some_and(|inner| inner.is::<ely_lok::Damaged>()) => text(cx, "office.error.damaged", &[]).to_string(),
+            None => ely_ui::i18n::error(cx, error).to_string(),
+        };
+        let text = text(
+            cx,
+            "office.error.open",
+            &[("name", name), ("error", &error)],
+        );
+        self.toast_unlogged(text, ely_gpui_component::primitives::Severity::Danger, cx);
+    }
+
+    /// Loads off the main thread; the tab takes focus.
+    fn load(&mut self, source: Source<ImportOf<Self>>, cx: &mut Context<Self>) {
+        let id = self.core().take_id();
+        self.load_into(id, source, cx);
+    }
+
+    /// Loads into tab id `id`, taken earlier from `next`.
+    fn load_into(&mut self, id: u64, source: Source<ImportOf<Self>>, cx: &mut Context<Self>) {
+        let (path, registry) = match &source {
+            Source::File(path, registry, _) => (path, Some(*registry)),
+            Source::Copy(path) | Source::Locked(path, _) | Source::Import(path, ..) => (path, None),
+        };
+        self.core_mut().loading.push((id, file_name(path), registry));
+        self.core_mut().asked_front(id);
+        self.start(id, source, cx);
+    }
+
+    /// Runs tab `id`'s load, unless its tab is behind then.
+    fn start(&mut self, id: u64, source: Source<ImportOf<Self>>, cx: &mut Context<Self>) {
+        let wanted = self.core_mut().flag(id, &source);
+        let inside = self.core_mut().entering(id);
+        let (path, password, text, registry) = match &source {
+            Source::File(path, registry, password) => (path.clone(), password.clone(), None, Some(*registry)),
+            Source::Copy(path) => (path.clone(), String::new(), None, None),
+            Source::Locked(path, password) => (path.clone(), password.clone(), None, None),
+            Source::Import(path, bytes, how) => (
+                path.clone(),
+                String::new(),
+                Some((Arc::clone(bytes), how.clone())),
+                None,
+            ),
+        };
+        let written = path.clone();
+        cx.notify();
+        let (worker, root) = (Arc::clone(&self.core().worker), self.core().work());
+        let slug = Self::KIND.app.slug();
+        log::info!("{slug}: tab {id} load queued");
+        // Starts now, not after the frame.
+        let loading = cx.background_spawn(async move {
+            match &text {
+                Some((bytes, _)) => std::fs::write(&written, bytes.as_slice())?,
+                None => files::check_package(&written)?,
+            }
+            let asked = std::time::Instant::now();
+            let reading = written.clone();
+            let loaded = ely_lok::behind(&worker, move |worker| {
+                let from = match &text {
+                    None => Load::File(&reading, &password),
+                    Some((_, how)) => Load::Import(&reading, how),
+                };
+                if !wanted.load(std::sync::atomic::Ordering::Acquire) {
+                    return Self::Engine::skipped(worker, from).map(|()| None);
+                }
+                inside.store(true, std::sync::atomic::Ordering::Release);
+                log::info!("{slug}: tab {id} has the engine after {} ms", asked.elapsed().as_millis());
+                let began = std::time::Instant::now();
+                let loaded = Self::Engine::load(worker, from);
+                log::info!("{slug}: tab {id} loaded in {} ms", began.elapsed().as_millis());
+                loaded.map(Some)
+            })
+            .await?;
+            let Some(loaded) = loaded else { return Ok(None) };
+            // The file's risks and session are read here too.
+            let risk = match files::macro_risk(&Self::KIND, &written)? {
+                true => Some(crate::Risk::Macros),
+                false => files::section_risk(&Self::KIND, &written)?.or_else(|| Self::Engine::risk(&loaded)),
+            };
+            let kept = match registry {
+                Some(_) => {
+                    let session = Session::load(written.clone())?;
+                    Some((files::work_dir(&root, id)?, session))
+                }
+                None => None,
+            };
+            let links = crate::Links::opened(Self::Engine::links(&loaded));
+            Ok(Some((loaded, risk, links, kept)))
+        });
+        cx.spawn(async move |this, cx| {
+            let loaded = loading.await;
+            in_window(&this, cx, |host, window, cx| match loaded {
+                _ if host.core().dropped(id) => host.discard(id, &source, loaded, cx),
+                Ok(None) => host.parked(id, source, cx),
+                Ok(Some(loaded)) => host.loaded(id, source, Ok(loaded), window, cx),
+                Err(error) => host.loaded(id, source, Err(error), window, cx),
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    /// A closed tab's load ends: the engine lets it go.
+    fn discard(
+        &mut self,
+        id: u64,
+        source: &Source<ImportOf<Self>>,
+        loaded: io::Result<Option<Prepared<<Self::Engine as Engine>::Loaded>>>,
+        cx: &mut Context<Self>,
+    ) {
+        let slug = Self::KIND.app.slug();
+        // A copy's work dir is its file's folder.
+        let scratch = match source {
+            Source::File(..) => None,
+            Source::Copy(path) | Source::Locked(path, _) | Source::Import(path, ..) => path.parent().map(Path::to_path_buf),
+        };
+        let loaded = match loaded {
+            Ok(Some((loaded, _, _, kept))) => Some((loaded, kept.map(|(work, _)| work).or(scratch))),
+            Ok(None) => {
+                log::info!("{slug}: closed tab {id} never took the engine");
+                forget_scratch(slug, scratch);
+                None
+            }
+            Err(error) => {
+                log::info!("{slug}: closed tab {id} ended its load: {error}");
+                forget_scratch(slug, scratch);
+                None
+            }
+        };
+        let Some((loaded, work)) = loaded else {
+            return self.core_mut().let_go(id);
+        };
+        forget_scratch(slug, work);
+        let worker = Arc::clone(&self.core().worker);
+        // Held until the engine closes it; the watch sees that.
+        let closing = cx.background_spawn(async move { ely_lok::behind(&worker, move |worker| Self::Engine::discard(worker, loaded)).await });
+        cx.spawn(async move |this, cx| {
+            match closing.await {
+                Ok(()) => log::info!("{slug}: closed tab {id} let its document go"),
+                Err(error) => log::error!("{slug}: closed tab {id} did not let go: {error}"),
+            }
+            this.update(cx, |host, _| host.core_mut().let_go(id))
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn loaded(
+        &mut self,
+        id: u64,
+        source: Source<ImportOf<Self>>,
+        loaded: io::Result<Prepared<<Self::Engine as Engine>::Loaded>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.core_mut()
+            .loading
+            .retain(|(loading, ..)| *loading != id);
+        let asks = self.core_mut().ended(id);
+        let imported = matches!(source, Source::Import(..));
+        let (path, registry, tried) = match source {
+            Source::File(path, registry, password) => (path, Some(registry), !password.is_empty()),
+            Source::Copy(path) | Source::Import(path, ..) => (path, None, false),
+            Source::Locked(path, _) => (path, None, true),
+        };
+        let opened = loaded.and_then(|(loaded, risk, links, kept)| {
+            let began = std::time::Instant::now();
+            let (work, session) = match kept {
+                Some(kept) => kept,
+                None => {
+                    let dir = path.parent().expect("a copy sits in its work dir");
+                    (dir.to_path_buf(), Session::new_file())
+                }
+            };
+            let (doc, view) = Self::Engine::open(&self.core().worker, loaded, window, cx)?;
+            log::info!("{}: tab {id} view in {} ms", Self::KIND.app.slug(), began.elapsed().as_millis());
+            Ok((doc, work, session, risk, links, view))
+        });
+        let (doc, work, session, risk, links, view) = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                for ask in asks {
+                    ask.answer(Err(format!("{} did not open: {}", path.display(), ely_ipc::Worded::logged(&error))));
+                }
+                if self.core_mut().failed_front(id)
+                    && let Some(tab) = self.active_tab()
+                {
+                    window.focus(&Self::Engine::focus(tab.view.read(cx)), cx);
+                }
+                if let Some(registry) = registry {
+                    self.core().shared.get_mut().sessions.close(registry);
+                }
+                cx.notify();
+                // A locked copy asks too, and stays a copy.
+                if error.kind() == io::ErrorKind::PermissionDenied && !imported {
+                    return crate::Dialogs::ask_password(self, path, tried, registry.is_none(), window, cx);
+                }
+                // A stopped or crashed engine fails the load first.
+                crate::Stopping::check_engine(self, cx);
+                return self.failed_open(&path.display().to_string(), &error, cx);
+            }
+        };
+        let name = match registry {
+            Some(_) => file_name(&path),
+            None if imported => file_name(&path),
+            None => {
+                let n = {
+                    let mut shared = self.core().shared.get_mut();
+                    shared.untitled += 1;
+                    shared.untitled.to_string()
+                };
+                text(cx, "office.untitled", &[("n", &n)])
+            }
+        };
+        let watching = self.watch(id, &view, cx);
+        // Hidden views never draw nor ask the engine.
+        let front = self.core().takes_front(id);
+        // Keys typed while it loaded go first.
+        let held = front && crate::hold::holds(self, id, window, cx);
+        if front && !held {
+            window.focus(&Self::Engine::focus(view.read(cx)), cx);
+        }
+        // Tabs keep the order their loads began.
+        let at = self.core().tabs.partition_point(|tab| tab.id < id);
+        self.core_mut().tabs.insert(at, Tab {
+            id,
+            view,
+            doc,
+            session,
+            registry,
+            name,
+            modified: false,
+            risk,
+            links,
+            work,
+            exporting: false,
+            pausing: 0,
+            reopen: false,
+            extra: Default::default(),
+            watching,
+            busy: Default::default(),
+        });
+        if front {
+            self.core_mut().landed_front(id);
+        }
+        self.tab_opened(id, cx);
+        match held {
+            true => crate::hold::hand_over::<Self>(id, window, cx),
+            false if front => crate::hold::replay(self, id, window, cx),
+            false => {}
+        }
+        // Points from now on; a crash copy comes back unsaved.
+        let tab = self.tab(id).expect("just opened");
+        let (named, size) = (tab.name.clone(), tab.session.fingerprint().map(|print| print.len));
+        log::info!(
+            "{}: opened {named} as tab {id}, risk {:?}, {} linked sources, {} tabs open, {} waiting, in front {front}",
+            Self::KIND.app.slug(),
+            tab.risk,
+            tab.links.sources().len(),
+            self.core().tabs.len(),
+            self.core().loading.len()
+        );
+        crate::Recovering::keep_tab(self, id, (&named, size), tried, cx);
+        crate::Recovering::reopened(self, id, &path, cx);
+        // Programs that asked for it are answered now.
+        for ask in asks {
+            cx.defer(move |cx| ely_ui::ask_again(Self::KIND.app, ask, cx));
+        }
+        cx.notify();
+    }
+
+    /// Load `id` found its tab behind: it waits until shown.
+    fn parked(&mut self, id: u64, source: Source<ImportOf<Self>>, cx: &mut Context<Self>) {
+        self.core_mut().park(id, source);
+        let core = self.core();
+        let name = core.loading.iter().find(|(of, ..)| *of == id).map_or_else(Default::default, |(_, name, _)| name.clone());
+        log::info!("{}: {name} waits as tab {id}, {} tabs open, {} waiting", Self::KIND.app.slug(), core.tabs.len(), core.loading.len());
+        self.wake_due(cx);
+        cx.notify();
+    }
+
+    /// Starts every waiting load whose tab is now wanted.
+    fn wake_due(&mut self, cx: &mut Context<Self>) {
+        for (id, source) in self.core_mut().due() {
+            log::info!("{}: tab {id} is wanted; its load starts", Self::KIND.app.slug());
+            self.start(id, source, cx);
+        }
+    }
+
+    /// Engine errors become toasts; kernel edits mark the session.
+    fn watch(&mut self, id: u64, view: &Entity<View<Self>>, cx: &mut Context<Self>) -> Vec<Subscription> {
+        let seen = std::cell::Cell::new(Self::Engine::edited(view.read(cx)));
+        let reported = move |host: &mut Self, view: &Entity<View<Self>>, modified: bool, cx: &mut Context<Self>| {
+            let edited = Self::Engine::edited(view.read(cx));
+            let moved = seen.replace(edited) != edited;
+            if let Some(tab) = host.tab_mut(id) {
+                match (modified, tab.modified) {
+                    (true, false) => tab.session.edit(),
+                    // An edit landing mid-save outdates its ticket.
+                    (true, true) if moved => tab.session.edit(),
+                    (false, true) => tab.session.reverted(),
+                    _ => {}
+                }
+                if modified != tab.modified {
+                    log::info!("{}: tab {id} modified {modified} after {edited} edits", Self::KIND.app.slug());
+                }
+                tab.modified = modified;
+            }
+            host.observed(id, view, cx);
+            if Self::Engine::settled(view.read(cx)) {
+                let (ready, rest): (Vec<_>, Vec<_>) = host
+                    .core_mut()
+                    .waiting
+                    .drain(..)
+                    .partition(|(tab, _)| *tab == id);
+                host.core_mut().waiting = rest;
+                for (_, then) in ready {
+                    cx.spawn(async move |this, cx| in_window(&this, cx, then))
+                        .detach_and_log_err(cx);
+                }
+            }
+            cx.notify();
+        };
+        Self::Engine::watch(view, cx, reported, move |host, error, cx| {
+            // A released tab's view may finish its queue late.
+            if host.tab(id).is_none() {
+                log::info!("office: tab {id} failed after it closed");
+                return;
+            }
+            // Engines log their own detail; words may quote errors.
+            log::warn!("{}: tab {id} reported an engine failure", Self::KIND.app.slug());
+            let shown = text(cx, "office.error.engine", &[("error", error)]);
+            host.toast_unlogged(shown, ely_gpui_component::primitives::Severity::Danger, cx);
+            crate::Stopping::check_engine(host, cx);
+        })
+    }
+}
+
+impl<H: Host> Opening for H {}
+
+/// Removes a closed load's scratch folder.
+fn forget_scratch(slug: &str, scratch: Option<PathBuf>) {
+    let Some(scratch) = scratch else { return };
+    match std::fs::remove_dir_all(&scratch) {
+        Ok(()) => log::info!("{slug}: scratch {} removed", scratch.display()),
+        Err(error) => log::warn!("{slug}: scratch {} stays: {error}", scratch.display()),
+    }
+}
