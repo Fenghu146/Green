@@ -21,6 +21,10 @@ pub struct Shot {
     /// How long to wait for the picture to settle; past it the run fails rather than
     /// writing a frame that may still be moving.
     pub timeout: Duration,
+    /// How long the picture must stand unchanged. Later work the frames cannot show — Typst
+    /// setting formulas — lands after the document is drawn, so two equal frames are not
+    /// proof; this is the gap to outlast.
+    pub still: Duration,
 }
 
 /// One frame of `files`, written to `shot.output`; the exit code says how it went.
@@ -87,7 +91,7 @@ pub fn run<V: Render>(
             let output = shot.output.clone();
             let ready = ready.clone();
             cx.spawn(async move |cx| {
-                let said = settled_frame(cx, handle, &output, timeout, ready.as_ref()).await;
+                let said = settled_frame(cx, handle, &output, timeout, shot.still, ready.as_ref()).await;
                 match said {
                     Ok(()) => code.set(0),
                     Err((exit, said)) => {
@@ -115,10 +119,9 @@ async fn settled_frame(
     handle: gpui::AnyWindowHandle,
     output: &PathBuf,
     timeout: Duration,
+    still: Duration,
     ready: &dyn Fn(&App) -> bool,
 ) -> Result<(), (i32, String)> {
-    // Longer than the gap measured between "the document is drawn" and the formulas landing.
-    const STILL: Duration = Duration::from_millis(2000);
     let started = std::time::Instant::now();
     let mut stable_since: Option<std::time::Instant> = None;
     let mut last: Option<image::RgbaImage> = None;
@@ -163,7 +166,12 @@ async fn settled_frame(
         if let Some((true, image)) = frame {
             let unchanged = last.as_ref().is_some_and(|before| before.as_raw() == image.as_raw());
             let since = *stable_since.get_or_insert_with(std::time::Instant::now);
-            if unchanged && since.elapsed() >= STILL {
+            if unchanged && since.elapsed() >= still {
+                log::info!(
+                    "capture: the picture stood still for {} ms over {drawn} frames; the run took {} ms",
+                    still.as_millis(),
+                    started.elapsed().as_millis()
+                );
                 return save(&image, output);
             }
             if !unchanged {

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[cfg(feature = "capture")]
-const USAGE: &str = "green --capture out.png [--theme light|dark] [--width N] [--height N] [--wait-ms N] file.md";
+const USAGE: &str = "green --capture out.png [--theme light|dark] [--width N] [--height N] [--still-ms N] [--wait-ms N] file.md";
 
 /// Runs a capture when the command line asks for one; `None` for an ordinary start.
 pub fn command_line() -> Option<i32> {
@@ -41,6 +41,9 @@ struct Request {
     theme: String,
     width: f32,
     height: f32,
+    /// How long the picture must stand unchanged before it is written.
+    still: Duration,
+    /// How long the whole settling may take.
     settle: Duration,
 }
 
@@ -51,6 +54,7 @@ fn parse(args: &[String]) -> Result<Request, String> {
     let mut theme = None;
     let mut width = 1400.0;
     let mut height = 900.0;
+    let mut still = Duration::from_millis(2000);
     let mut settle = Duration::from_millis(15000);
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -71,6 +75,9 @@ fn parse(args: &[String]) -> Result<Request, String> {
             }
             "--width" => width = number(&value("--width")?, "--width")?,
             "--height" => height = number(&value("--height")?, "--height")?,
+            "--still-ms" => {
+                still = Duration::from_millis(number(&value("--still-ms")?, "--still-ms")? as u64)
+            }
             "--wait-ms" => {
                 settle = Duration::from_millis(number(&value("--wait-ms")?, "--wait-ms")? as u64)
             }
@@ -88,6 +95,7 @@ fn parse(args: &[String]) -> Result<Request, String> {
         theme: theme.unwrap_or_else(|| "light".into()),
         width,
         height,
+        still,
         settle,
     })
 }
@@ -126,6 +134,7 @@ fn execute(request: Request) -> i32 {
         output: request.output,
         size: gpui::size(gpui::px(request.width), gpui::px(request.height)),
         timeout: request.settle,
+        still: request.still,
     };
     // The root hands back its desk, so the capture can tell when the document has drawn.
     let held: std::rc::Rc<std::cell::RefCell<Option<gpui::Entity<crate::desk::Desk>>>> =
