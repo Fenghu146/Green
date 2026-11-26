@@ -50,10 +50,18 @@ jobs:
       #
       # When green-math's conversion gets its real-typst test (the one that reads
       # GREEN_TYPST and compiles the output), install the Typst CLI at the typst
-      # version in Cargo.toml here and export GREEN_TYPST — and make that test
-      # fail rather than skip when the variable is unset. As of 2026-11-26 no test
-      # reads GREEN_TYPST, so there is nothing to wire yet.
-      - run: cargo test --workspace --exclude ely-pdf-worker --exclude ely-lok --exclude green --locked
+      # version in Cargo.toml here and export GREEN_TYPST — the skips step below
+      # fails the job until then, on purpose. As of 2026-11-26 no test reads
+      # GREEN_TYPST, so there is nothing to wire yet.
+      - shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --exclude ely-pdf-worker --exclude ely-lok --exclude green --locked 2>&1 | tee tests.log
+      # A skip nobody sees is a test that does not exist; this writes every one
+      # of them to the job summary, and fails on one skipped for a missing tool.
+      - if: always()
+        shell: bash
+        run: scripts/skips.sh tests.log
 
   test-app:
     name: test green
@@ -69,7 +77,13 @@ jobs:
       # apps/green/src/desk/tests.rs calls Desk::tree_failed (no such method).
       # Kept enabled on purpose: turning it off is how that breakage would go
       # unnoticed. It goes green when S2 lands.
-      - run: cargo test -p green --locked
+      - shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p green --locked 2>&1 | tee tests.log
+      - if: always()
+        shell: bash
+        run: scripts/skips.sh tests.log
 
   lint:
     name: lint
@@ -79,20 +93,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - run: rustup show active-toolchain
-      # Warnings do not fail the job. Three are open: clippy::type_complexity in
-      # green-math's `cached` (the SEEN OnceLock type), and two missing-docs
-      # warnings inside the vendored gpui-pre copy. `-D warnings` goes here in
-      # the commit that clears them — a deny gate that trips on an old, unrelated
-      # warning teaches people to ignore the gate.
+      # Warnings do not fail the job. One is open and ours: clippy::type_complexity
+      # in green-math's `cached` (the SEEN OnceLock type). `vendor/` is upstream
+      # code with its own lints, so its warnings are counted apart and never gate
+      # us. When our count reaches zero, the gate is `test ! -s ours.log`.
       - shell: bash
         run: |
           set -o pipefail
-          cargo clippy --workspace --exclude ely-pdf-worker --lib --bins --locked \
+          cargo clippy --workspace --exclude ely-pdf-worker --no-deps --lib --bins --locked \
             --message-format short -- -W clippy::all 2>&1 | tee clippy.log
-          # Recorded every run so the count going down (and then reaching zero) is visible.
-          warnings=$(grep -c ': warning: ' clippy.log || true)
-          echo "clippy warnings: $warnings" >>"$GITHUB_STEP_SUMMARY"
-          grep ': warning: ' clippy.log >>"$GITHUB_STEP_SUMMARY" || true
+          grep ': warning: ' clippy.log | grep -v '^vendor' >ours.log || true
+          grep ': warning: ' clippy.log | grep '^vendor' >vendored.log || true
+          ours=$(grep -c . ours.log || true)
+          vendored=$(grep -c . vendored.log || true)
+          echo "clippy: $ours in our crates, $vendored in vendored code (not our lint)" >>"$GITHUB_STEP_SUMMARY"
+          cat ours.log >>"$GITHUB_STEP_SUMMARY" || true
 
   tools:
     name: tools
