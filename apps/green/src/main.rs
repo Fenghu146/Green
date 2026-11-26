@@ -6,6 +6,7 @@ mod autosave;
 #[cfg(test)]
 mod bench;
 mod blocks;
+mod capture;
 mod clip;
 mod compare;
 mod count;
@@ -36,6 +37,9 @@ use ely_platform::AppId;
 
 fn main() {
     portable::adopt();
+    if let Some(code) = capture::command_line() {
+        std::process::exit(code);
+    }
     if let Some(code) = remote::command_line() {
         std::process::exit(code);
     }

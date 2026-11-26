@@ -2759,6 +2759,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "gpui-pre-windows",
+ "image",
  "libc",
  "log",
  "notify",
