@@ -82,6 +82,10 @@ impl MarkdownDocument {
         cx: &mut Context<Self>,
     ) {
         self.waiting = None;
+        // A block a fold hides opens by unfolding its heading first.
+        if let Some(ix) = ix {
+            self.unfold_block(ix, cx);
+        }
         let pressed = match ix.map(|ix| self.parsed.blocks.get(ix)) {
             Some(None) => return log::warn!("markdown document: a press on a block read away"),
             pressed => pressed.flatten().map(|block| block.range.start),
@@ -365,6 +369,8 @@ impl MarkdownDocument {
             true => Some(self.covered(open).1 + 1).filter(|next| *next < self.parsed.blocks.len()),
             false => here.checked_sub(1),
         };
+        // A folded heading's blocks are stepped over.
+        let next = self.shown_from(next, down);
         let Some(next) = next else {
             return false;
         };

@@ -26,6 +26,7 @@ mod text;
 mod tools;
 mod toolbar;
 mod view;
+mod viewstate;
 
 use ely_platform::AppId;
 

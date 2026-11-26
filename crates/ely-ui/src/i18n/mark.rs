@@ -126,7 +126,7 @@ pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("mark.search.more", "前 {count} 条结果"),
     ("mark.search.missed", "{name} 未能搜索"),
     ("mark.menu.table", "表格"),
-    ("mark.table.insert", "插入表格"),
+    ("mark.table.insert", "表格"),
     ("mark.table.row_above", "上方插入行"),
     ("mark.table.row_below", "下方插入行"),
     ("mark.table.column_left", "左侧插入列"),

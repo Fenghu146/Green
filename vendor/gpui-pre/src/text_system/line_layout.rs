@@ -494,7 +494,19 @@ struct WrapScratch {
 struct LineLayoutCacheState {
     previous_frame: FrameCache,
     current_frame: FrameCache,
+    /// Green: lines a fold hid, kept so unfolding lays nothing out again.
+    kept: KeptLines,
 }
+
+/// Green: layouts that outlive the frame that drew them.
+#[derive(Default)]
+struct KeptLines {
+    lines: FxHashMap<Arc<CacheKey>, Arc<LineLayout>>,
+    wrapped_lines: FxHashMap<Arc<CacheKey>, Arc<WrappedLineLayout>>,
+}
+
+/// Green: how many kept layouts one window holds; past this the oldest go.
+const KEPT_LINES: usize = 4096;
 
 #[derive(Default)]
 struct FrameCache {
@@ -548,6 +560,7 @@ impl LineLayoutCache {
         let LineLayoutCacheState {
             previous_frame,
             current_frame,
+            ..
         } = &mut *state;
 
         for key in &previous_frame.used_lines[range.start.lines_index..range.end.lines_index] {
@@ -585,12 +598,39 @@ impl LineLayoutCache {
         let LineLayoutCacheState {
             previous_frame,
             current_frame,
+            ..
         } = &mut *self.state.borrow_mut();
         std::mem::swap(previous_frame, current_frame);
         current_frame.lines.clear();
         current_frame.wrapped_lines.clear();
         current_frame.used_lines.clear();
         current_frame.used_wrapped_lines.clear();
+    }
+
+    /// Green: keeps the lines drawn in the last frame, so a fold that hides
+    /// them and a later unfold reuse their layout instead of shaping again.
+    pub fn keep_frame(&self) {
+        let _font_generation = self.clear_if_font_generation_changed();
+        let mut state = self.state.borrow_mut();
+        if state.kept.lines.len() + state.kept.wrapped_lines.len() >= KEPT_LINES {
+            state.kept.lines.clear();
+            state.kept.wrapped_lines.clear();
+        }
+        let LineLayoutCacheState {
+            previous_frame,
+            kept,
+            ..
+        } = &mut *state;
+        for (key, line) in previous_frame.lines.iter() {
+            kept.lines
+                .entry(key.clone())
+                .or_insert_with(|| line.clone());
+        }
+        for (key, line) in previous_frame.wrapped_lines.iter() {
+            kept.wrapped_lines
+                .entry(key.clone())
+                .or_insert_with(|| line.clone());
+        }
     }
 
     pub fn layout_wrapped_line<Text>(
@@ -623,6 +663,18 @@ impl LineLayoutCache {
         let mut state = self.state.borrow_mut();
         let previous_frame_entry = state.previous_frame.wrapped_lines.remove_entry(key);
         if let Some((key, layout)) = previous_frame_entry {
+            state
+                .current_frame
+                .wrapped_lines
+                .insert(key.clone(), layout.clone());
+            state.current_frame.used_wrapped_lines.push(key);
+            layout
+        } else if let Some((key, layout)) = state
+            .kept
+            .wrapped_lines
+            .get_key_value(key)
+            .map(|(key, layout)| (key.clone(), layout.clone()))
+        {
             state
                 .current_frame
                 .wrapped_lines
@@ -697,8 +749,17 @@ impl LineLayoutCache {
         let LineLayoutCacheState {
             previous_frame,
             current_frame,
+            kept,
         } = &mut *state;
         if let Some((key, layout)) = previous_frame.lines.remove_entry(key) {
+            current_frame.lines.insert(key.clone(), layout.clone());
+            current_frame.used_lines.push(key);
+            layout
+        } else if let Some((key, layout)) = kept
+            .lines
+            .get_key_value(key)
+            .map(|(key, layout)| (key.clone(), layout.clone()))
+        {
             current_frame.lines.insert(key.clone(), layout.clone());
             current_frame.used_lines.push(key);
             layout
@@ -707,6 +768,8 @@ impl LineLayoutCache {
             let mut layout = self
                 .platform_text_system
                 .layout_line(&text, font_size, runs);
+            #[cfg(feature = "shape-count")]
+            super::SHAPED_LINES.fetch_add(1, Ordering::Relaxed);
 
             if let Some(force_width) = force_width {
                 apply_force_width_to_layout(&mut layout, force_width);

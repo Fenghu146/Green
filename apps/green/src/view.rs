@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use ely_gpui_component::documents::{
-    DocumentEvent, EditRefusal, LARGEST_READ, MarkdownDocument, MarkdownMode,
+    DocumentEvent, EditRefusal, LARGEST_READ, MarkdownDocument, MarkdownMode, OutlineHeading,
 };
 use gpui::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable as _,
@@ -56,12 +56,7 @@ impl Mode {
 }
 
 /// One heading of the outline, and its line from zero.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Heading {
-    pub level: usize,
-    pub title: String,
-    pub line: usize,
-}
+pub type Heading = OutlineHeading;
 
 /// The caret and the first line in view.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -81,6 +76,8 @@ pub struct MarkView {
     /// The mark at the last load or save.
     saved: String,
     pub mode: Mode,
+    /// This file's kept folds are in.
+    loaded: bool,
     /// A saved file's folder: pictures resolve and go here.
     pub(crate) folder: Option<PathBuf>,
     /// The mode first took input (PERF-07).
@@ -132,6 +129,7 @@ impl MarkView {
             changed: 0,
             saved,
             mode,
+            loaded: false,
             folder: None,
             shown: false,
             wheel: 0.0,
@@ -187,17 +185,39 @@ impl MarkView {
         cx.notify();
     }
 
-    /// The headings as last read.
+    /// The headings as a tree: keys, parents, and the cleaned titles.
     pub fn outline(&self, cx: &gpui::App) -> Vec<Heading> {
-        let outline = self.document.read(cx).outline(cx);
-        outline
-            .into_iter()
-            .map(|(heading, line)| Heading {
-                level: usize::from(heading.depth),
-                title: heading.title,
-                line,
-            })
-            .collect()
+        self.document.read(cx).outline_tree(cx)
+    }
+
+    /// The kind of block at the caret, for the paragraph menu's tick.
+    pub fn block_style(&self, cx: &gpui::App) -> Option<ely_gpui_component::documents::TargetBlock> {
+        self.document.read(cx).block_kind(cx)
+    }
+
+    /// Takes this file's kept folds, once it opens.
+    pub fn set_folds(&mut self, folded: Vec<String>, cx: &mut Context<Self>) {
+        self.loaded = true;
+        self.document
+            .update(cx, |document, cx| document.set_folded(folded, cx));
+    }
+
+    /// Whether this file's kept folds are in yet.
+    pub fn loaded_folds(&self) -> bool {
+        self.loaded
+    }
+
+    /// The headings folded in this file now, as its view state keeps them.
+    pub fn folds(&self, cx: &gpui::App) -> Vec<String> {
+        self.document.read(cx).folded_keys()
+    }
+
+    /// Shows the heading at byte `at` and line `line`, unfolding its ancestors
+    /// in the text first.
+    pub fn go(&mut self, at: usize, line: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.document
+            .update(cx, |document, cx| document.unfold_at(at, cx));
+        self.reveal((line, 0), window, cx);
     }
 
     /// Line and column `at` in view and focus, caret there.
@@ -352,5 +372,7 @@ impl Render for MarkView {
 }
 
 mod menu;
+#[cfg(test)]
+mod fold_tests;
 #[cfg(test)]
 mod tests;

@@ -350,6 +350,12 @@ fn toggle_in(
     if s != e {
         return wrap(text, nodes, &within, s, e, format);
     }
+    // A link with nothing selected takes no word: its empty address is what
+    // the caret types into.
+    if matches!(format, InlineFormat::Link | InlineFormat::Image) {
+        crossed(text, nodes, &within, s, s, format)?;
+        return Ok(pair(s, format));
+    }
     let prev = text[within.start..s].chars().next_back();
     let next = text[s..within.end].chars().next();
     if prev.is_none_or(stop) && next.is_none_or(stop) {
@@ -401,10 +407,15 @@ fn written(format: InlineFormat, inner: &str) -> (String, String) {
     (open.into(), close.into())
 }
 
-/// An empty pair at `at`, the caret inside it.
+/// An empty pair at `at`, the caret inside it; a link's caret goes inside the
+/// address, ready for the URL.
 fn pair(at: usize, format: InlineFormat) -> Change {
     let (open, close) = written(format, "");
-    let caret = at + open.len();
+    let caret = match format {
+        // `[]()`: the caret sits between the parentheses.
+        InlineFormat::Link | InlineFormat::Image => at + open.len() + 2,
+        _ => at + open.len(),
+    };
     (vec![(at..at, format!("{open}{close}"))], caret..caret)
 }
 

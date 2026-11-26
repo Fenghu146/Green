@@ -177,7 +177,7 @@ stdin 收 `{apiVersion, path, ext, content(base64), contentOmitted}`，stdout �
 
 ### 5.3 折叠状态是否记忆
 
-**记忆，按文件**：键是「文件绝对路径 + 标题文本路径」，不是行号（标题上下移动不失效）。存放在 `%LOCALAPPDATA%\Green\view-state.json`，**不写进 `.md`，也不在文档旁生成 sidecar**。文件被删/改名 → 该条记录过期丢弃。
+**记忆，按文件**：键是「文件绝对路径 + 标题文本 + 同级序号」，不是行号（标题上下移动不失效；同名标题靠序号区分）。存放在 `%LOCALAPPDATA%\Green\view-state.json`，**不写进 `.md`，也不在文档旁生成 sidecar**。文件被删/改名 → 该条记录过期丢弃。
 
 ### 5.4 性能
 
@@ -250,13 +250,13 @@ export pdf: pages=12 bytes=845120 fonts=[{"name":"SourceHanSansSC","bytes":41200
 | 撤销 / 重做 | 同 | `IconButton` + 快捷键绑定 |
 | 格式刷 | 同（复制段落/行内样式） | `IconButton` |
 | 插入▾ | 图片 / 表格 / 公式 / 分隔线 / 代码块 | `menus::DropdownMenu` |
-| B I U S 高亮 颜色 字号（"正文1"） | 同；字号用语义名（正文/标题1–3） | `ToggleButton` / `forms::ColorPicker` / `forms::Select` |
+| B I U S 高亮 颜色 字号（"正文1"） | 同；字号用语义名（正文 / 标题1–6），当前段落那一项打勾 | `ToggleButton` / `forms::ColorPicker` / `forms::Select` |
 | 对齐组 | 左/中/右/两端 | `buttons::SegmentedControl` |
 | 有序/无序/缩进 | 同 | `SegmentedControl` + 两个 `IconButton` |
 | 右侧 查找 / 更多 | 同 | `IconButton` + `DropdownMenu` |
 | ~~AI 写~~ | **不做** | — |
 
-正文：单栏居中，宽度 `48rem`（与基座 `measure` 一致），标题层级字号分明（H1 1.6× / H2 1.35× / H3 1.15×，粗体），块级公式独立成行居中，行内公式随文（§6）。主题深浅两套，取组件库 `Theme`。
+正文：单栏居中，宽度 `48rem`（与基座 `measure` 一致），标题层级字号分明（H1 1.6× / H2 1.35× / H3 1.15× / H4 1.05× / H5 1.0× / H6 0.95×，全部粗体；后三级靠粗细与间距区分），块级公式独立成行居中，行内公式随文（§6）。主题深浅两套，取组件库 `Theme`。
 
 ## 9. 性能
 

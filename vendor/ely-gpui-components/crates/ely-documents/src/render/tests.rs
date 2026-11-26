@@ -90,7 +90,7 @@ fn headings_step_up_from_the_body_by_typoras_ratios(cx: &mut TestAppContext) {
                 rems(0.5).to_pixels(rem),
             )
         });
-        for (ordinal, step) in [2.25, 1.75, 1.5, 1.25, 1.0, 1.0].into_iter().enumerate() {
+        for (ordinal, step) in [1.6, 1.35, 1.15, 1.05, 1.0, 0.95].into_iter().enumerate() {
             let selector = Box::leak(format!("markdown-heading-{ordinal}").into_boxed_str());
             let high = cx.debug_bounds(selector).expect("drawn").size.height;
             let off = high - pad - base * step * 1.3;

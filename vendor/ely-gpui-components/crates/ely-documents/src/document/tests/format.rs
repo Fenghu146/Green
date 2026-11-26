@@ -71,7 +71,13 @@ fn a_caret_takes_its_word_or_an_empty_pair() {
     assert_eq!(ok("a wo‸rd z", Strong), "a **⟨word⟩** z");
     assert_eq!(ok("a ‸ z", Strong), "a **‸** z");
     assert_eq!(ok("a\n\n‸", Emphasis), "a\n\n*‸*", "a blank line");
-    assert_eq!(ok("a ‸ z", Link), "a [‸]() z");
+    assert_eq!(ok("a ‸ z", Link), "a [](‸) z", "the caret takes the URL");
+    assert_eq!(ok("a ‸ z", Image), "a ![](‸) z");
+    assert_eq!(
+        ok("a wo‸rd z", Link),
+        "a wo[](‸)rd z",
+        "a link takes no word"
+    );
     assert_eq!(
         ok("x　wo‸rd", Strong),
         "x　**⟨word⟩**",
