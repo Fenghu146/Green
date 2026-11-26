@@ -208,7 +208,11 @@ list item、alert 的 `text`、table cell 都是字符串，不能嵌块——�
 
 折叠/展开改变的是可见集合与后续块的 y 偏移，不得触发任何**文字重排**（re-shape）。S2 验收：5 万字文档，单次折叠 ≤ 16 ms，且测量窗口内 shape 调用次数为 0。
 
-基准单独跑：折叠（5 万字 × 30 次，看 P95 与 shape）与 3000 标题打开大纲这两项是 `#[ignore]` 的基准，只在空载时手动跑，例如 `cargo test --release -p green --features shape-count -- --ignored --nocapture`；输出带当时的 CPU 负载。debug 只打印数字、不设门禁，门禁只有 release 的 16 ms 与 shape 0。CI 只跑 release 基准，不跑 debug 基准——一个只在并行编译时才会红的测试，会训练所有人忽略红色。
+基准单独跑：折叠（5 万字 × 30 次，看 P95 与 shape）与 3000 标题打开大纲这两项是 `#[ignore]` 的基准，只在空载时手动跑，例如 `cargo test --release -p green --features shape-count -- --ignored --nocapture --test-threads=1`；输出带当时的 CPU 负载。debug 只打印数字、不设门禁，门禁只有 release 的 16 ms 与 shape 0。CI 只跑 release 基准，不跑 debug 基准——一个只在并行编译时才会红的测试，会训练所有人忽略红色。
+
+**基准必须串行**（`--test-threads=1`）：shape 计数器（`patches/gpui/0016`、`0017`）是**进程级全局量**，两个基准并行时，3000 标题大纲那项排版出的行会落进折叠的计数窗口，测出 2–27 个假的 shape。本机对照：折叠单独跑 10/10 全 0；同进程与大纲基准并行 20/20 出现成簇非零（形如 `[0,0,2,…]`、`[…,5,20,0]`，CI 的 `[5,20,2]` 同源）；串行 10/10 全 0。这是**测量的作用域问题，不是产品重排**；根治要计数器随窗口（`WindowTextSystem`）而非进程，那归 `patches/gpui` 的 tools 线。
+
+折叠基准在每次 toggle 前驱动一帧，因为真实按压总落在已画出的帧里；连续 toggle、中间不画帧（实测 1/2/8/30 次）shape 也是 0，所以没有"必须每帧刷新"的产品限制要记录。
 
 ## 6. 行内公式（S2 必须先解）
 

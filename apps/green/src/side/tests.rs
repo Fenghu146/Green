@@ -451,7 +451,7 @@ fn a_heading_in_the_outline_jumps_and_unfolds_the_text(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-#[ignore = "benchmark: run by hand on a quiet machine, e.g. cargo test --release -p green -- --ignored --nocapture"]
+#[ignore = "benchmark: run by hand on a quiet machine, e.g. cargo test --release -p green -- --ignored --nocapture --test-threads=1"]
 fn a_long_outline_opens_quickly(cx: &mut TestAppContext) {
     let (data, files) = (
         tempfile::tempdir().expect("data"),

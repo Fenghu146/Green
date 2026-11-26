@@ -45,8 +45,18 @@ fn target(view: &Entity<MarkView>, cx: &mut TestAppContext) -> (usize, usize) {
     (found.at, found.line)
 }
 
+/// One fold or unfold, as a press runs it.
+fn toggle(view: &Entity<MarkView>, at: usize, cx: &mut gpui::VisualTestContext) {
+    view.update_in(cx, |view, window, cx| {
+        let document = view.document().clone();
+        document.update(cx, |document, cx| {
+            document.toggle_fold_at(at, window, cx);
+        });
+    });
+}
+
 #[gpui::test]
-#[ignore = "benchmark: run by hand on a quiet machine, e.g. cargo test --release -p green --features shape-count -- --ignored --nocapture"]
+#[ignore = "benchmark: run by hand on a quiet machine, e.g. cargo test --release -p green --features shape-count -- --ignored --nocapture --test-threads=1"]
 fn folding_fifty_thousand_characters_keeps_the_goal(cx: &mut TestAppContext) {
     let (view, cx) = open(&long_text(), cx);
     let (at, line) = target(&view, cx);
@@ -59,29 +69,27 @@ fn folding_fifty_thousand_characters_keeps_the_goal(cx: &mut TestAppContext) {
     // One fold and unfold draws whatever the first toggle brings into view;
     // the 30 below are the measurement.
     for _ in 0..2 {
-        view.update_in(cx, |view, window, cx| {
-            let document = view.document().clone();
-            document.update(cx, |document, cx| {
-                document.toggle_fold_at(at, window, cx);
-            });
-        });
+        toggle(&view, at, cx);
         cx.run_until_parked();
     }
     let mut times = Vec::new();
     #[cfg(feature = "shape-count")]
     let mut shapes = Vec::new();
     for _ in 0..30 {
+        // A press lands in a drawn frame, so the fold it makes starts from the
+        // frame before it; without one here the test measures a state no press
+        // can reach.
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
         #[cfg(feature = "shape-count")]
         gpui::WindowTextSystem::reset_shaped_lines();
         let start = Instant::now();
-        view.update_in(cx, |view, window, cx| {
-            let document = view.document().clone();
-            document.update(cx, |document, cx| {
-                document.toggle_fold_at(at, window, cx);
-            });
-        });
+        toggle(&view, at, cx);
         cx.run_until_parked();
         times.push(start.elapsed());
+        // The frame the fold causes: where a line it hid would lay out again.
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
         #[cfg(feature = "shape-count")]
         shapes.push(gpui::WindowTextSystem::shaped_lines());
     }
