@@ -169,6 +169,7 @@ pub(crate) fn open_in(
     let fail = |error: String| -> ! { startup::fail(app, &error) };
     let work = ely_office::fresh_work(&data).unwrap_or_else(|error| fail(format!("{error}")));
     crate::keys::bind(cx);
+    crate::plugins::start(&data, cx);
     let recent_file = data.join("recent.json");
     let look_file = data.join("look.json");
     // An unreadable look is reported; the default shows.

@@ -24,6 +24,7 @@ ely-office.workspace = true
 ely-ipc.workspace = true
 ely-platform.workspace = true
 ely-ui.workspace = true
+green-plugins.workspace = true
 gpui.workspace = true
 log.workspace = true
 futures.workspace = true

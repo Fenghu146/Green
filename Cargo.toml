@@ -88,6 +88,7 @@ ely-pdf-engine = { path = "crates/ely-pdf-engine" }
 ely-platform = { path = "crates/ely-platform" }
 ely-start = { path = "crates/ely-start" }
 ely-ui = { path = "crates/ely-ui" }
+green-plugins = { path = "crates/green-plugins" }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
