@@ -1,7 +1,6 @@
 //! Markdown files as the shell's engine (§14.3).
 
 use std::{
-    convert::Infallible,
     hash::{DefaultHasher, Hash as _, Hasher as _},
     io,
     path::Path,
@@ -51,12 +50,12 @@ impl Engine for Mark {
     type Doc = Doc;
     type View = MarkView;
     type Loaded = Source;
-    type Import = Infallible;
+    type Import = ();
 
-    fn load(_: &mut (), from: Load<Infallible>) -> io::Result<Source> {
+    fn load(_: &mut (), from: Load<()>) -> io::Result<Source> {
         let path = match from {
             Load::File(path, _) => path,
-            Load::Import(_, never) => match *never {},
+            Load::Import(path, ()) => path,
         };
         // The shell reads PermissionDenied as a locked file.
         let bytes = std::fs::read(path).map_err(|error| match error.kind() {

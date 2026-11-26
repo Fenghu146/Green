@@ -4030,6 +4030,7 @@ dependencies = [
  "embed-resource",
  "futures",
  "gpui-pre",
+ "green-plugins",
  "jiff",
  "log",
  "notify",
@@ -4054,6 +4055,17 @@ dependencies = [
 [[package]]
 name = "green-math"
 version = "0.1.17"
+
+[[package]]
+name = "green-plugins"
+version = "0.1.17"
+dependencies = [
+ "base64 0.23.1",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "guillotiere"

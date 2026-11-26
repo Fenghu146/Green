@@ -133,8 +133,25 @@ OFL 不在原白名单（MIT/Apache/BSD/ISC/Zlib/Unicode/CC0）里，是用户�
   "command": ["python", "csv_plugin.py"], "timeoutMs": 3000, "enabled": true }
 ```
 
-stdin 收 `{apiVersion, path, ext, content(base64), contentOmitted}`，stdout 回 `{apiVersion, blocks[], meta}`。`content` 上限 8 MB；Block 九种。失败/超时/坏清单 → 降级 plaintext + 状态栏，不影响启动。
-兼容：`apiVersion` 整数、超范围拒绝；`capabilities` 协商；两侧忽略未知字段；破坏性变更 `apiVersion += 1`，旧版留 2 个小版本；按 (path, mtime, size, 插件版本) 缓存。
+stdin 收 `{apiVersion, path, ext, content(base64), contentOmitted, capabilities}`，stdout 回 `{apiVersion, blocks[], meta}`。`content` 上限 8 MB；超过时 `content` 为 `null`、`contentOmitted` 为 `true`，插件按 `path` 自读。失败/超时/坏清单 → 降级 plaintext + 状态栏，不影响启动。
+兼容：`apiVersion` 整数、超范围拒绝；`capabilities` 协商（清单省略 = `["blocks@1"]`）；两侧忽略未知字段、新增字段可选有默认值；破坏性变更 `apiVersion += 1`，旧版留 2 个小版本；`timeoutMs` 50–30000、默认 3000，覆盖进程启动到退出。
+缓存：按 (path, mtime, size, 插件 version, `command` 指到的文件指纹) 缓存；打开文件时比对指纹，脚本或清单变了就重读清单并清掉该插件的缓存（热更新，不重启 Green）。
+
+**v1 Block 契约**（外部作者唯一接触的接口；core 的 Block 模型向它对齐，不改契约）：
+
+| kind | 字段 |
+| --- | --- |
+| `paragraph` | `text` |
+| `heading` | `level` 1–6、`text` |
+| `list` | `ordered`、`start`、`items`（字符串数组） |
+| `code` | `language`（可选）、`text` |
+| `quote` | `blocks`（Block 数组） |
+| `table` | `head`（字符串数组）、`rows`（字符串二维数组）、`aligns`（可选） |
+| `image` | `url`、`alt`（可选）、`link`（可选） |
+| `rule` | — |
+| `alert` | `level`、`text` |
+
+list item、alert 的 `text`、table cell 都是字符串，不能嵌块——这是 v1 的边界；要嵌块是 `apiVersion += 1`（记在 `later.md`）。文本字段按行内 Markdown 解析，插件负责转义字面字符；表格单元格的 `|` 与换行宿主兜底。不认识的 kind、已知 kind 的坏字段：只丢那一块并记日志；整体降级只留给进程失败、非法 JSON、坏清单。
 加格式：**改 Green 0 个文件、不重编译、不发版**（这是保留插件系统的唯一理由）。以后再说：市场、沙箱、插件间依赖、native dylib。
 
 ## 4. 多标签
