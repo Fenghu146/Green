@@ -150,7 +150,6 @@ impl Desk {
 
     pub fn look_all(&mut self, cx: &mut Context<Self>) {
         // A write, ours or not, may change what Git sees.
-        self.ask_git(cx);
         let ids: Vec<u64> = self.core.tabs.iter().map(|tab| tab.id).collect();
         self.look_at(ids, cx);
     }

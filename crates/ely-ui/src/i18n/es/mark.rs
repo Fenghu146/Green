@@ -150,23 +150,6 @@ pub(super) const ES: &[(&str, &str)] = &[
     ("mark.look.actual", "Tamaño real"),
     ("mark.settings.size", "Tamaño del texto del documento"),
     ("mark.settings.size.hint", "Porcentaje del tamaño de texto de la interfaz; el menú Ver y el zoom con la rueda también lo cambian"),
-    ("mark.git.unchanged", "Git: sin cambios"),
-    ("mark.git.changed", "Git: con cambios"),
-    ("mark.git.untracked", "Git: sin seguimiento"),
-    ("mark.git.ignored", "Git: ignorado"),
-    ("mark.git.conflicted", "Git: en conflicto"),
-    ("mark.git.unknown", "Git: desconocido"),
-    ("mark.git.none", "Git: requiere ElyTree"),
-    (
-        "mark.git.needs",
-        "El Git de Ely viene con ElyTree. Instale ElyTree desde la versión de Ely Office para ver el estado de Git de este archivo.",
-    ),
-    ("mark.git.open", "Mostrar el historial de este archivo en ElyTree"),
-    (
-        "mark.git.missing",
-        "ElyTree no está instalado. Instale ElyTree desde la versión de Ely Office para ver el historial de este archivo.",
-    ),
-    ("mark.git.failed", "ElyTree no se abrió: {error}"),
     (
         "mark.large.modes",
         "Los archivos grandes se quedan en modo código fuente",

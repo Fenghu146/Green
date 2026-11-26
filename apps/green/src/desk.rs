@@ -57,10 +57,6 @@ pub struct Desk {
     pub look: crate::look::Look,
     pub look_file: PathBuf,
     /// Git's word on the shown file, and which tab asked.
-    pub tracked: Option<crate::vcs::Tracked>,
-    asked: Option<u64>,
-    /// The shown file's fingerprint when Git was last asked.
-    asked_print: Option<ely_files::Fingerprint>,
     /// The find box, while open.
     pub(crate) finding: Option<crate::finding::Find>,
     /// The copy being converted; a newer one drops it.
@@ -134,12 +130,6 @@ impl Host for Desk {
         self.restore_shown(id, cx);
         if self.finding.is_some() {
             self.count(cx);
-        }
-        // A save changes what Git sees.
-        let print = self.active_tab().and_then(|tab| tab.session.fingerprint());
-        if print != self.asked_print {
-            self.asked_print = print;
-            self.ask_git(cx);
         }
         let path = self
             .tab(id)
@@ -216,9 +206,6 @@ pub(crate) fn open_in(
             keeping,
             look: look.clone(),
             look_file,
-            tracked: None,
-            asked: None,
-            asked_print: None,
             finding: None,
             copying: None,
             tab_asked: None,
@@ -264,16 +251,6 @@ pub(crate) fn open_in(
         }
         desk.keep_every(cx);
         cx.on_release(|desk, _| desk.keeping.close()).detach();
-        // Another shown tab asks Git again.
-        cx.observe_self(|desk, cx| {
-            let shown = desk.active_tab().map(|tab| tab.id);
-            if shown != desk.asked {
-                desk.asked = shown;
-                desk.tracked = None;
-                desk.ask_git(cx);
-            }
-        })
-        .detach();
         cx.on_app_quit(|desk, cx| {
             // A system end skips asking: unsaved tabs keep points.
             if desk.core.tabs.iter().any(|tab| tab.dirty(cx)) {
@@ -302,7 +279,6 @@ pub(crate) fn open_in(
         cx.observe_window_activation(window, |desk, window, cx| {
             if window.is_window_active() {
                 desk.relist(cx);
-                desk.ask_git(cx);
             }
         })
         .detach();
@@ -394,7 +370,6 @@ impl Desk {
         let Some(view) = self.active_view() else {
             return StatusBar::new().left(state);
         };
-        let git = self.git_item(cx);
         let this = cx.entity();
         let modes = Mode::ALL.into_iter().fold(
             SegmentedControl::new("mark-mode", view.read(cx).mode.name()).size(ControlSize::Sm),
@@ -415,10 +390,6 @@ impl Desk {
         let bar = StatusBar::new().left(state);
         let bar = match self.outside_item(cx) {
             Some(outside) => bar.left(outside),
-            None => bar,
-        };
-        let bar = match git {
-            Some(git) => bar.left(git),
             None => bar,
         };
         let caret = self.caret_said(cx).expect("a tab");

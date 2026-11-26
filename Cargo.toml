@@ -102,3 +102,7 @@ gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 mail-parser = { path = "vendor/mail-parser" }
 pulldown-cmark = { path = "vendor/pulldown-cmark" }
 zbus = { path = "vendor/zbus" }
+
+# The component library, forked for Green's math, folding and outline.
+[patch."https://github.com/ELY-Open-Source/Ely-GPUI-Components"]
+ely-gpui-component = { path = "vendor/ely-gpui-components" }

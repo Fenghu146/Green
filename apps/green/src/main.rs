@@ -25,7 +25,6 @@ mod side;
 mod text;
 mod tools;
 mod toolbar;
-mod vcs;
 mod view;
 
 use ely_platform::AppId;

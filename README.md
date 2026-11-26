@@ -24,6 +24,16 @@ target/debug/green.exe path/to/note.md
 - 开发构建从 `assets/fonts/` 读字体；打包后从可执行文件旁的 `fonts/` 读。
 - 应用数据在 `%LOCALAPPDATA%\Green\green\`：日志 `ely.log`、设置 `settings.json`、会话 `session.json`。
 
+## 扩展语法
+
+标准 Markdown 之外，Green 只认一条：
+
+| 写法 | 效果 |
+| --- | --- |
+| `==文字==` | 高亮。文件里原样保留 `==文字==`，不改写；表达式的 Typst 侧对应 `#highlight[...]` |
+
+`==` 不是 CommonMark/GFM 语法：用 Typora、Obsidian 以外的编辑器打开会看到原始 `==`。这是有意为之——Green 不往文件里写自有标记，折叠、大纲都只存视图状态。
+
 ## 许可
 
 Green 自有代码以 **GPL-3.0-or-later** 发布，全文见 [`LICENSE`](LICENSES/GPL-3.0.txt)。
