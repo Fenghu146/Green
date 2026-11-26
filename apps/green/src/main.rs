@@ -19,6 +19,7 @@ mod outside;
 mod paths;
 mod places;
 mod plugins;
+mod portable;
 mod remote;
 mod rename;
 mod restore;
@@ -31,6 +32,7 @@ mod view;
 use ely_platform::AppId;
 
 fn main() {
+    portable::adopt();
     if let Some(code) = remote::command_line() {
         std::process::exit(code);
     }
