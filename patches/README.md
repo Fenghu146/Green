@@ -13,10 +13,11 @@
 三个脚本的 `check` 都是真重放：下载/克隆基线，按序应用全部补丁，再与 `vendor/` **逐文件比对**。
 不过就说不过，CI 每次跑。`write` 用同样的过程重写 `vendor/`。
 
-## 每个补丁的头两行
+## 每个补丁的头注释
 
 ```text
 baseline: …
+why: …
 bump: …
 ```
 
@@ -24,6 +25,8 @@ bump: …
   没有记录 VCS commit，所以基线身份是「名字 + 版本 + tarball 的 sha256」，hash 在
   `scripts/vendor-gpui.sh` 里。组件库写 pin 的完整 sha，文件名也带它的前七位。
   脚本核对这两处与 `Cargo.toml` 一致，不一致就拒绝应用。
+- **`why`**：这条补丁为什么存在。三句话：为什么需要它、没有它时的默认行为、上游做到什么之后可以删。
+  它比补丁本身活得久；半年后看到一个新类型，头注释比 diff 先回答它为什么在这里。
 - **`bump`**：撞上游时怎么现场判断。两句话：一句「上游已经这样了 → 删掉本补丁」，
   一句「签名或结构变了 → 重写，不要重放」。
 
@@ -37,9 +40,11 @@ pin 一致；不要在任何地方再抄一份版本号。
 
 1. 改 `vendor/` 里的文件——构建真正读的是它。
 2. 把改动落成补丁放进对应目录，编号接着来；组件库的带基线前缀（`fc71e96-0002-…`）。
-   头两行照上节写。
+   头注释照上节写。
 3. `scripts/vendor-*.sh check` 必须仍然通过：它重放序列并与 `vendor/` 逐文件比对。
-4. 跑 `python scripts/compatibility.py` 更新 `docs/compatibility.md`。
+4. 跑 `python scripts/compatibility.py` 更新 `docs/compatibility.md`。这一步必做：CI 的
+   `python scripts/compatibility.py --check` 会重算补丁数量，页面过期就红。生成物过期就重新生成，
+   不要改判据；这次就是被 vendor job 的兼容性检查抓到的。
 
 ## 现在有什么
 
@@ -52,11 +57,13 @@ pin 一致；不要在任何地方再抄一份版本号。
 - `ely-gpui-components/fc71e96-0001-marked.patch`：`==高亮==` 在 `tree` 读取里成为 `Mark` run。
 - `ely-gpui-components/fc71e96-0002-fold-and-outline.patch`：S2a 的折叠与大纲树（`document/fold.rs`、
   `document/visual.rs`、`lists/outline.rs` 等 15 个文件）。
+- `ely-gpui-components/fc71e96-0003-alert-titles.patch`：可注入的 alert 标题全局，供 i18n 本地化；
+  未设置时仍用 `AlertKind::title()`。头注释记了它为什么存在与何时可以删。
 - `ely-gpui-components/fc71e96-prune.txt`：组件库自己仓库的文档、CI、api 快照等 266 个路径，
   vendor 不保留。它不是补丁，是 vendoring 政策；脚本按这份清单删，删完再应用补丁。
 - `crates-io/`：五个 crate 各一条 `0001`，都是上游行为不对的小修（对象路径回收、GFM 脚注链接、
   引号内含 `@` 的地址、AT-SPI 缓存信号与注销）。文件名带 crate 与版本，`baseline:` 行带
   tarball 的 sha256。
 
-`vendor/` 目前仍在 git 里（2718 个文件），两个 `check` 比对的就是它。改成「不入库、构建时重建」
-只需要把两个 `write` 接进构建之前，并 `git rm -r --cached vendor`——那是主线的决定。
+`vendor/` 目前仍在 git 里（2718 个文件），三个 `check` 比对的就是它。改成「不入库、构建时重建」
+只需要把三个 `write` 接进构建之前，并 `git rm -r --cached vendor`——那是主线的决定。
