@@ -29,7 +29,7 @@ def patches(folder):
     if not names:
         sys.exit(f"compatibility.py: patches/{folder} holds no patch")
     numbers = [re.findall(r"\d{4}", name)[-1] for name in names]
-    span = numbers[0] if len(numbers) == 1 else f"{numbers[0]}–{numbers[-1]}"
+    span = numbers[0] if len(set(numbers)) == 1 else f"{numbers[0]}–{numbers[-1]}"
     return f"{span}，{len(names)} 个"
 
 
@@ -46,7 +46,8 @@ def lines():
         f"版本：Green {version}。",
         f"依赖：gpui-pre {gpui}（patches/gpui {patches('gpui')}）；"
         f"组件库 {rev[:7]}（patches/ely-gpui-components {patches('ely-gpui-components')}，"
-        f"裁掉 {pruned()} 个只属于它自己仓库的路径）。",
+        f"裁掉 {pruned()} 个只属于它自己仓库的路径）；"
+        f"crates.io 的另外五个 crate（patches/crates-io {patches('crates-io')}）。",
     ]
 
 
