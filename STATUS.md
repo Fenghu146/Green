@@ -25,6 +25,14 @@
 - 历史记录：2026-11-26 的 main 上 `test-app` job（`cargo test -p green`）因两处测试代码错误红——`apps/green/src/output/tests.rs` 调用了不是 green dev-dependency 的 `ely_pdf_engine`，`apps/green/src/desk/tests.rs` 调用了不存在的 `Desk::tree_failed`；当时 S2 工作树已有修复。该 job 故意保持启用，关掉它只会让同类破坏无人发现。这只记当时的原因，当前状态以 CI 结果为准。
 ## 已知债
 
+### 组件库快照反向依赖 `green-math`
+
+`patches/ely-gpui-components/fc71e96-0004` 给 `ely-documents` 加了
+`green-math` 依赖（带 version，才能过 cargo-deny 的 wildcard 检查）。这等于让
+「上游快照 + 补丁」反过来牵住我们自己的 crate：从 pin 重建 vendor 时，仓库路径必须存在。
+长期方向是**依赖倒置**：组件库不改，由调用方（app）把转换好的 Typst 源码传进去，
+vendor 于是只跟着 pin 走。本轮为赶 S2b 不做倒置，但改 vendor 或重建脚本前先看这条。
+
 ### S2b 阶段二：大纲标题里的公式还没接回
 
 合并 `origin/main` 时大纲采用了 main 的折叠树（`Outline::item` + `on_fold`），
