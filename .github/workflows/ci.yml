@@ -130,6 +130,33 @@ jobs:
           echo "clippy: $ours in our crates, $vendored in vendored code (not our lint)" >>"$GITHUB_STEP_SUMMARY"
           cat ours.log >>"$GITHUB_STEP_SUMMARY" || true
 
+  # The release benchmark, off the PR path on purpose: its numbers move with
+  # whatever else the machine is doing, and a gate that reddens under load
+  # teaches people to ignore red. Design §5.4: CI runs the release benchmark
+  # alone. The debug run prints and never gates, and both benchmarks are
+  # #[ignore]d, so the ordinary test jobs see them as ignored, not failed.
+  bench:
+    name: bench (release)
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: rustup show active-toolchain
+      - shell: bash
+        run: |
+          set -o pipefail
+          cargo test --release -p green --features shape-count --locked -- --ignored --nocapture 2>&1 | tee bench.log
+      # The number and the machine that took it, together: the tests print both.
+      - if: always()
+        shell: bash
+        run: |
+          grep -E '^(folding|outline):' bench.log >>"$GITHUB_STEP_SUMMARY" || true
+          scripts/skips.sh bench.log
+
   tools:
     name: tools
     runs-on: windows-latest
