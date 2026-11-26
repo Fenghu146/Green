@@ -8,7 +8,7 @@ use crate::{desk::Desk, view::Mode};
 
 actions!(
     mark,
-    [VisualMode, SourceMode, PreviewMode, ToggleSource, CheckDisk]
+    [VisualMode, SourceMode, PreviewMode, ToggleSource, CheckDisk, OpenLicenses]
 );
 
 pub fn bind(cx: &mut App) {
@@ -130,6 +130,8 @@ pub fn menus(look: &crate::look::Look, cx: &App) -> Vec<Menu> {
             MenuItem::separator(),
             item("mark.outside.check", Box::new(CheckDisk)),
         ]),
+        Menu::new(text(cx, "menu.help", &[]))
+            .items([item("menu.help.licenses", Box::new(OpenLicenses))]),
     ]
 }
 
@@ -148,6 +150,7 @@ impl Desk {
 
     pub fn mode_actions(root: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
         root.on_action(cx.listener(|desk, _: &CheckDisk, _, cx| desk.check_disk(cx)))
+            .on_action(cx.listener(|desk, _: &OpenLicenses, _, cx| desk.open_licenses(cx)))
             .on_action(
                 cx.listener(|desk, _: &ToggleSource, window, cx| desk.toggle_source(window, cx)),
             )

@@ -15,13 +15,15 @@ cargo tree -p green -e normal,build --prefix none --format "{p}|{l}"
 ## 白名单
 
 MIT / Apache-2.0 / BSD（2、3、0 条款）/ ISC / Zlib / Unicode-3.0 / CC0-1.0 / OFL-1.1。
-双许可只要有一个落在白名单内即算通过（表里写选中的那个）。AGPL / MPL / SSPL 一律标红。
+双许可只要有一个落在白名单内即算通过（表里写选中的那个）。AGPL / SSPL 一律拒绝；
+MPL-2.0 不进全局白名单，只对 `option-ext` 一个 crate 开例外（见下），其余 MPL 标红。
 
 ## 结论
 
 - `green.exe` 的图：**582** 个包，其中 9 个是本项目自己的 crate（GPL-3.0-or-later），
   **573 个第三方**。
-- 第三方里 **569 个在白名单内**；**3 个需要单独说明**；**1 个标红**（MPL-2.0）。
+- 第三方里 **569 个在白名单内**；**3 个需要单独说明**（BSL-1.0 ×2、CDLA-Permissive-2.0 ×1）；
+  **1 个例外（`option-ext`，MPL-2.0，已满足）**。
 - 整个 `Cargo.lock`（1081 个包，含其他 workspace 应用与 dev 依赖）另有 6 个 MPL-2.0 的包，
   **不在 `green.exe` 里**；没有 AGPL / SSPL。
 
@@ -29,22 +31,22 @@ MIT / Apache-2.0 / BSD（2、3、0 条款）/ ISC / Zlib / Unicode-3.0 / CC0-1.0
 | --- | ---: | --- |
 | 白名单 | 569 | 见下方完整表 |
 | 需说明 | 3 | `clipboard-win`、`error-code`（BSL-1.0）；`webpki-roots`（CDLA-Permissive-2.0） |
-| 红（MPL-2.0） | 1 | `option-ext 0.2.0` |
+| 例外（已满足） | 1 | `option-ext 0.2.0`（MPL-2.0，仅此一 crate） |
 
-## 红：`option-ext 0.2.0`（MPL-2.0）
+## 例外：`option-ext 0.2.0`（MPL-2.0，已满足）
 
 依赖链：`directories 6.0.0` → `dirs-sys 0.5.0` → `option-ext 0.2.0`，被 `ely-platform` 与
 `ely-office` 用来找数据目录。
 
-- MPL-2.0 是**文件级**弱 copyleft：它不要求 Green 整体改许可证，但对 `option-ext` 的源文件
-  有“可获取对应源码”的义务。我们没有修改它。
-- 现在的 `deny.toml` 把 MPL-2.0 放进了 allow，所以 `cargo deny` 不会报；本审计按你的白名单
-  标红。两处口径需要统一。
-- 两条路，二选一：
-  1. **接受并履行**：在包内附 `option-ext` 的源码（单文件）或书面源码提供声明；`cargo about`
-     已经把 MPL 全文放进 NOTICES。
-  2. **移除**：把 `directories` 换成 MIT/Apache 的 `etcetera`（或自己读 `%LOCALAPPDATA%`），
-     依赖链就消失。这是 `crates/ely-platform` 的改动，不在本线范围内。
+- MPL-2.0 是**文件级**弱 copyleft：它不要求 Green 整体改许可证，义务只落在 `option-ext`
+  自己的源文件上。
+- **我们没有修改它**，它本来就公开在 crates.io（`option-ext 0.2.0`），随包附 MPL 全文
+  （`THIRD-PARTY-NOTICES.txt`）。因此义务只剩“让对应源码可获取”，已满足。
+- `deny.toml` 的全局白名单**不含 MPL-2.0**；只对 `option-ext` 开一条 `licenses.exceptions`，
+  注释里写明条件：未修改、附全文、已声明、源码公开。**一旦我们修改它，或引入任何新的
+  MPL crate，`cargo deny` 必须报红并重新评审。**
+- 没有换成 `etcetera`：路径解析刚被便携模式验证过，为一个不产生实际义务的弱 copyleft
+  去动它，风险大于收益。
 
 ## 需说明
 
@@ -66,14 +68,14 @@ MIT / Apache-2.0 / BSD（2、3、0 条款）/ ISC / Zlib / Unicode-3.0 / CC0-1.0
 
 | 字体 | 文件 | 版权行 | OFL |
 | --- | --- | --- | --- |
-| Noto Sans CJK SC Regular | `NotoSansCJKsc-Regular.otf` | `© 2014-2021 Adobe (http://www.adobe.com/)`（字体 name 表） | **缺**：`OFL.txt` 是通用文本，没有这行版权 |
+| Noto Sans CJK SC Regular | `NotoSansCJKsc-Regular.otf` | `© 2014-2021 Adobe (http://www.adobe.com/)`（字体 name 表） | `OFL.txt`：当前分支是通用文本，缺这行版权；`feat/export` 上已在补 |
 | Noto Sans CJK SC Bold | `NotoSansCJKsc-Bold.otf` | 同上 | 同上 |
-| Noto Sans Math | **缺** | — | **缺** |
-| Noto Sans Mono | **缺** | — | **缺** |
+| Noto Sans Math | `feat/export` 上：`NotoSansMath-Regular.ttf` + `OFL-NotoSansMath.txt` | 该 OFL 自带 | 随字体带自己的 OFL |
+| Noto Sans Mono | `feat/export` 上：`NotoSansMono-Regular.ttf` + `OFL-NotoSansMono.txt` | 该 OFL 自带 | 随字体带自己的 OFL |
 
-结论：**Noto Sans Math 与 Noto Sans Mono 完全缺失**；已有的 CJK 两个字重共用一个没有版权行的
-`OFL.txt`。按“每个字体族的 OFL 必须带自己的版权行”，这两项都要补。`assets/fonts/` 归 S5，
-本线没有加文件。
+结论：本分支只有 CJK 两个字重，其 `OFL.txt` 缺 Adobe 版权行；Math 与 Mono 及各自的 OFL
+已在 `feat/export` 上补齐。合并后四个字体族各自带版权行与 OFL，满足“每个字体族的 OFL 必须带
+自己的版权行”。`assets/fonts/` 归 S5，本线只读核对，没有加或改任何字体文件。
 
 ### 图标
 
@@ -94,7 +96,7 @@ MIT / Apache-2.0 / BSD（2、3、0 条款）/ ISC / Zlib / Unicode-3.0 / CC0-1.0
    （`THIRD-PARTY-NOTICES.txt`），不暗示作者背书。
 3. **OFL-1.1（字体）**：每个字体族带自己的版权行与 OFL 全文；不单独售卖字体；
    不改名、不改字形（Reserved Font Name）。
-4. **MPL-2.0（`option-ext`）**：提供该文件的可获取源码，或书面源码提供声明。
+4. **MPL-2.0（`option-ext`，唯一例外）**：不修改它；源码在 crates.io 公开；MPL 全文随包。
 5. **BSL-1.0 / CDLA-Permissive-2.0**：保留声明，不背书。
 
 ## 插件与 GPL
@@ -398,7 +400,7 @@ MIT / Apache-2.0 / BSD（2、3、0 条款）/ ISC / Zlib / Unicode-3.0 / CC0-1.0
 | `num_cpus` | 1.17.0 | MIT OR Apache-2.0 | 运行 | ✓ MIT |
 | `once_cell` | 1.21.4 | MIT OR Apache-2.0 | 运行 | ✓ MIT |
 | `once_cell_polyfill` | 1.70.2 | MIT OR Apache-2.0 | 运行 | ✓ MIT |
-| `option-ext` | 0.2.0 | MPL-2.0 | 运行 | ✗ MPL-2.0 |
+| `option-ext` | 0.2.0 | MPL-2.0 | 运行 | ⚠ 例外（已满足） |
 | `owned_ttf_parser` | 0.25.1 | Apache-2.0 | 运行 | ✓ Apache-2.0 |
 | `palette` | 0.7.7 | MIT OR Apache-2.0 | 运行 | ✓ MIT |
 | `palette_derive` | 0.7.7 | MIT OR Apache-2.0 | 运行 | ✓ MIT |

@@ -21,7 +21,6 @@ allow = [
     "ISC",
     "MIT",
     "MIT-0",
-    "MPL-2.0",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
@@ -36,6 +35,14 @@ allow = ["CDLA-Permissive-2.0"]
 [[licenses.exceptions]]
 crate = "webpki-root-certs"
 allow = ["CDLA-Permissive-2.0"]
+
+# MPL-2.0 is not allowed in general: only this one crate, and only while we
+# leave it unmodified, ship the MPL text in THIRD-PARTY-NOTICES.txt, declare it
+# in docs/LICENSE-AUDIT.md, and its source stays public on crates.io. A patched
+# copy, or any new MPL crate, must fail here and be reviewed again.
+[[licenses.exceptions]]
+crate = "option-ext"
+allow = ["MPL-2.0"]
 
 [licenses.private]
 ignore = true

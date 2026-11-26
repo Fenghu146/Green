@@ -18,15 +18,17 @@ const USAGE: &str = "usage: ely-mark docs
        ely-mark new FILE
        ely-mark export FILE TARGET
        ely-mark save FILE
+       ely-mark licenses
        ely-mark text get FILE
        ely-mark text replace FILE FIND WITH
        ely-mark text set FILE TEXT
        ely-mark text append FILE TEXT
-open and new start ElyMark if needed; the rest require it running (with FILE open, not in preview for text).
+open and new start ElyMark if needed; the rest require it running (licenses needs no file; text needs FILE open, not in preview).
 get prints the Markdown as it stands, byte for byte, unsaved typing included.
 replace changes every exact, case-matched FIND in the Markdown, as one undo step.
 set replaces the whole Markdown (empty clears it; keeps file line endings; one undo step).
 append adds non-empty TEXT on a new line at the end (keeps file line endings; one undo step).
+licenses opens the licence and third-party page, or focuses it.
 Any argument written as - is read from standard input, up to 64 MiB.
 Exit codes: 0 success, 1 failed, 2 wrong usage, 3 not running.";
 const APPEND_EMPTY: &str = "TEXT must not be empty";
@@ -36,7 +38,7 @@ const PREVIEW: &str = "{file} shows as a preview, which takes no edits";
 pub fn command_line() -> Option<i32> {
     remote::command_line(&Cli {
         app: AppId::Mark,
-        nouns: &[("text", request)],
+        nouns: &[("text", request), ("licenses", licences)],
         usage: USAGE,
         exact: &["get"],
         blanks: &[("md", include_bytes!("../../../packaging/windows/new/new.md")), ("markdown", b"")],
@@ -58,6 +60,14 @@ fn request(words: &[&str]) -> Result<Vec<String>, String> {
     })
 }
 
+/// `licenses` takes no words of its own.
+fn licences(words: &[&str]) -> Result<Vec<String>, String> {
+    match words {
+        [] => Ok(vec!["licenses".into()]),
+        _ => Err("licenses takes no argument".into()),
+    }
+}
+
 /// Requests from other programs reach `desk`.
 pub fn listen(desk: &Entity<Desk>, cx: &mut App) {
     let asked = desk.clone();
@@ -67,6 +77,13 @@ pub fn listen(desk: &Entity<Desk>, cx: &mut App) {
 impl Desk {
     /// Answers a request against the tab's document.
     pub fn answer_request(&mut self, ask: Ask, cx: &mut Context<Self>) {
+        // The licence page takes no file: the request names it alone.
+        let licenses = serde_json::from_str::<Vec<String>>(&ask.request)
+            .is_ok_and(|words| words == ["licenses"]);
+        if licenses {
+            self.open_licenses(cx);
+            return ask.answer(Ok(crate::licenses::PAGE.into()));
+        }
         let Some((id, words, ask)) = self.asked(ask, cx) else {
             return;
         };
