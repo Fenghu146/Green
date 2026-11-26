@@ -1,0 +1,11 @@
+{
+  "id": "tsv",
+  "name": "TSV",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "extensions": [".tsv", ".tab"],
+  "command": ["python", "tsv_plugin.py"],
+  "timeoutMs": 3000,
+  "enabled": true,
+  "capabilities": ["blocks@1"]
+}
