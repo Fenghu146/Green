@@ -1,0 +1,38 @@
+baseline: ely-gpui-components fc71e964088e0de2a81abff572a5684be17ebfd4, the rev Cargo.toml pins
+why: S2a changed H3 from 1.5x to 1.15x (design §8), so the zoom heading test kept asserting the old height and failed at 37px. The expectation now reads heading_step(3), the same token the renderer uses.
+bump: Drop this when the fork updates the test itself; if its heading_step lives elsewhere, point the import there.
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/render/tests.rs b/vendor/ely-gpui-components/crates/ely-documents/src/render/tests.rs
+index a356da0..9105e83 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/render/tests.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/render/tests.rs
+@@ -1,6 +1,6 @@
+ use gpui::{Context, IntoElement, Render, TestAppContext, Window, div, prelude::*, px, rems};
+ 
+-use super::{HEAVY, MarkdownRenderer, Style, highlight};
++use super::{HEAVY, MarkdownRenderer, Style, heading_step, highlight};
+ use crate::theme::{ActiveTheme, TextSize, Theme};
+ 
+ /// `source` drawn in a 400-point column.
+@@ -128,9 +128,10 @@ fn a_zoomed_document_scales_its_headings(cx: &mut TestAppContext) {
+     let (document, cx) = cx.add_window_view(|window, cx| {
+         MarkdownDocument::new("### a\n", MarkdownMode::Preview, window, cx)
+     });
++    let zoom = 1.5;
+     document.update(cx, |document, cx| {
+         let look = DocumentLook {
+-            scale: 1.5,
++            scale: zoom,
+             ..DocumentLook::default()
+         };
+         document.set_look(look, cx);
+@@ -148,7 +149,9 @@ fn a_zoomed_document_scales_its_headings(cx: &mut TestAppContext) {
+         .expect("drawn")
+         .size
+         .height;
+-    let off = high - pad - base * 1.5 * 1.5 * 1.3;
++    // H3 is 1.15× since S2a (design §8), not the old 1.5×; the row's
++    // 1.3 line-height and the 0.5rem top pad are unchanged.
++    let off = high - pad - base * zoom * heading_step(3) * 1.3;
+     assert!(off.abs() < px(0.5), "{high:?}");
+ }
+ 
