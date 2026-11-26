@@ -4002,6 +4002,8 @@ dependencies = [
  "lopdf",
  "sha2 0.10.9",
  "ttf-parser",
+ "typst",
+ "typst-layout",
 ]
 
 [[package]]

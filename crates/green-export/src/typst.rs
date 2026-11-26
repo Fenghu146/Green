@@ -33,11 +33,29 @@ pub(crate) fn preamble() -> String {
     format!("{PREAMBLE}{}\n\n", green_math::gbox_rule(GBOX_STROKE))
 }
 
-/// `blocks` as one Typst document, and every formula kept as its TeX because
-/// the converter refused it (§7.8: one formula must not take the document down).
+/// What a formula must pass before it enters the document: conversion and,
+/// when an export supplies one, a real Typst compile.
+type Check<'a> = dyn Fn(&str, &str) -> Result<()> + 'a;
+
+fn checked(tex: &str, check: Option<&Check<'_>>) -> Result<()> {
+    let markup = formula(tex)?;
+    if let Some(check) = check {
+        check(tex, &markup)?;
+    }
+    Ok(())
+}
+
+/// `blocks` as one Typst document, converting formulas without compiling them.
+/// Export uses [`source_checked`], which also keeps the ones Typst refuses.
 pub fn source(blocks: &[Block]) -> Result<(String, Vec<(String, String)>)> {
+    source_checked(blocks, None)
+}
+
+/// `blocks` as one Typst document, and every formula conversion or compile
+/// failure kept as its TeX (§7.8: one formula must not take the document down).
+pub fn source_checked(blocks: &[Block], check: Option<&Check<'_>>) -> Result<(String, Vec<(String, String)>)> {
     let mut kept = Vec::new();
-    let blocks = settled(blocks, &mut kept);
+    let blocks = settled(blocks, &mut kept, check);
     let mut out = preamble();
     blocks_into(&mut out, &blocks, "")?;
     let mut notes = Vec::new();
@@ -60,27 +78,33 @@ pub fn source(blocks: &[Block]) -> Result<(String, Vec<(String, String)>)> {
 /// `blocks` with every formula the converter refuses kept as text: a block
 /// formula as its literal `$…$`, an inline one as its TeX with the math mark
 /// taken off. Each is recorded with why.
-fn settled(blocks: &[Block], kept: &mut Vec<(String, String)>) -> Vec<Block> {
+fn settled(
+    blocks: &[Block],
+    kept: &mut Vec<(String, String)>,
+    check: Option<&Check<'_>>,
+) -> Vec<Block> {
     blocks
         .iter()
         .map(|block| match block {
-            Block::Math(tex) => match formula(tex) {
+            Block::Math(tex) => match checked(tex, check) {
                 Ok(_) => block.clone(),
                 Err(error) => {
                     kept.push((tex.clone(), format!("{error:#}")));
                     Block::Paragraph(Inline::plain(format!("${tex}$")))
                 }
             },
-            Block::Paragraph(text) => Block::Paragraph(settled_inline(text, kept)),
-            Block::Heading(level, text) => Block::Heading(*level, settled_inline(text, kept)),
-            Block::Quote(body) => Block::Quote(settled(body, kept)),
+            Block::Paragraph(text) => Block::Paragraph(settled_inline(text, kept, check)),
+            Block::Heading(level, text) => {
+                Block::Heading(*level, settled_inline(text, kept, check))
+            }
+            Block::Quote(body) => Block::Quote(settled(body, kept, check)),
             Block::Alert { title, body } => Block::Alert {
                 title: title.clone(),
-                body: settled(body, kept),
+                body: settled(body, kept, check),
             },
             Block::Footnote { label, body } => Block::Footnote {
                 label: label.clone(),
-                body: settled(body, kept),
+                body: settled(body, kept, check),
             },
             Block::List { start, items } => Block::List {
                 start: *start,
@@ -88,16 +112,23 @@ fn settled(blocks: &[Block], kept: &mut Vec<(String, String)>) -> Vec<Block> {
                     .iter()
                     .map(|item| Item {
                         task: item.task,
-                        blocks: settled(&item.blocks, kept),
+                        blocks: settled(&item.blocks, kept, check),
                     })
                     .collect(),
             },
             Block::Table { aligns, head, rows } => Block::Table {
                 aligns: aligns.clone(),
-                head: head.iter().map(|cell| settled(cell, kept)).collect(),
+                head: head
+                    .iter()
+                    .map(|cell| settled(cell, kept, check))
+                    .collect(),
                 rows: rows
                     .iter()
-                    .map(|row| row.iter().map(|cell| settled(cell, kept)).collect())
+                    .map(|row| {
+                        row.iter()
+                            .map(|cell| settled(cell, kept, check))
+                            .collect()
+                    })
                     .collect(),
             },
             other => other.clone(),
@@ -106,12 +137,16 @@ fn settled(blocks: &[Block], kept: &mut Vec<(String, String)>) -> Vec<Block> {
 }
 
 /// `text` without the math marks the converter refuses; the TeX stays as text.
-fn settled_inline(text: &Inline, kept: &mut Vec<(String, String)>) -> Inline {
+fn settled_inline(
+    text: &Inline,
+    kept: &mut Vec<(String, String)>,
+    check: Option<&Check<'_>>,
+) -> Inline {
     let mut out = text.clone();
     out.styles.retain(|(range, style)| match style {
         Style::Math => {
             let tex = &text.text[range.clone()];
-            match formula(tex) {
+            match checked(tex, check) {
                 Ok(_) => true,
                 Err(error) => {
                     kept.push((tex.to_string(), format!("{error:#}")));
@@ -408,7 +443,8 @@ fn push_close(out: &mut String, wrap: Wrap) {
 
 /// `tex` as Typst math, or every command the whitelist does not cover.
 pub fn formula(tex: &str) -> Result<String> {
-    latex_to_typst(tex).map_err(|unsupported| {
+    let tex = tex.replace('\u{200b}', "");
+    latex_to_typst(&tex).map_err(|unsupported| {
         let names: Vec<String> = unsupported.iter().map(ToString::to_string).collect();
         anyhow!("formula `{tex}`: {}", names.join("; "))
     })
@@ -426,6 +462,11 @@ pub(crate) const MARKS: &[(char, &str)] = &[
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
+        // The notes glue formulas with U+200B; it must not reach the PDF's
+        // text layer, where copying it would carry an invisible character.
+        if ch == '\u{200b}' {
+            continue;
+        }
         // A mark the bundled faces cannot draw, as the symbol they can.
         if let Some((_, markup)) = MARKS.iter().find(|(mark, _)| *mark == ch) {
             out.push_str(markup);
