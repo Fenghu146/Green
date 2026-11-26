@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# Reclaims build output under the shared target root. Never a source tree, never
+# `cargo clean`, never a forced worktree removal.
+#
+#   scripts/disk-prune                 dry run: what it would delete, and why not
+#   scripts/disk-prune -Apply          delete what the dry run called deletable
+#                                      (--apply is accepted too)
+#
+# Deletable means: a profile directory under the target root (debug, release,
+# release-fast, debug-*, release-*) whose last write is at least 15 minutes old,
+# whose .cargo-lock can be opened exclusively, that no cargo or rustc is using,
+# and whose worktree has no uncommitted changes.
+#
+# Never touches a checkout (including D:\Amp\Green), vendor/, patches/, assets/
+# or sccache; never runs `git worktree remove --force` or a bare `cargo clean`.
+#
+# The flat pools are unowned by design. The machine-level CARGO_TARGET_DIR keeps
+# `target/` from growing inside a checkout, but every build that forgets a
+# per-line target dir lands in debug/ release/ release-fast/ instead. Those three
+# are therefore fair game whole whenever nothing is building; each line is still
+# required to set CARGO_TARGET_DIR=D:\cargo-target\<line>.
+#
+# Deletion goes through `robocopy /MIR` from an empty directory, then removes the
+# empty root: on Windows that beats Remove-Item -Recurse on trees of small files
+# by a wide margin (measured: 35 GB / 8.8k files in 16 s).
+set -uo pipefail
+
+root=${DISK_PRUNE_ROOT:-/d/cargo-target}
+min_age=${DISK_PRUNE_AGE:-15}
+apply=0
+for arg in "$@"; do
+  case $arg in
+    --apply | -Apply) apply=1 ;;
+    --dry-run | -DryRun) apply=0 ;;
+    -h | --help)
+      sed -n '2,12p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "disk-prune: unknown argument $arg; try --help" >&2
+      exit 2
+      ;;
+  esac
+done
+
+[ -d "$root" ] || {
+  echo "disk-prune: no target root at $root" >&2
+  exit 2
+}
+root=$(cd "$root" && pwd)
+
+free_kb() { df -Pk "$1" | awk 'NR == 2 { print $4 }'; }
+size_mb() { du -sm "$1" 2>/dev/null | cut -f1; }
+age_min() {
+  local mins
+  mins=$(find "$1" -maxdepth 0 -mmin +"$min_age" 2>/dev/null)
+  [ -n "$mins" ] && echo "≥${min_age}m" || echo "<${min_age}m"
+}
+is_profile() {
+  case ${1##*/} in
+    debug | release | release-fast | debug-* | release-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# A build directory's worktree, by the naming the lines already use.
+worktree_of() {
+  local name=$1 cand
+  for cand in "/d/Amp/$name" "/d/Amp/green-${name#green-}"; do
+    [ -d "$cand" ] || continue
+    if git -C "$cand" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      echo "$cand"
+      return
+    fi
+  done
+}
+
+# Any cargo or rustc whose command line names this directory: "pid name".
+busy_with() {
+  local dir=$1 win slash
+  win=$(cygpath -w "$dir" 2>/dev/null || echo "$dir")
+  slash=${win//\\//}
+  powershell -NoProfile -Command "
+    Get-CimInstance Win32_Process -Filter \"Name='cargo.exe' OR Name='rustc.exe'\" |
+      Where-Object { \$_.CommandLine -and (\$_.CommandLine.Contains('$win') -or \$_.CommandLine.Contains('$slash')) } |
+      ForEach-Object { '{0} {1}' -f \$_.ProcessId, \$_.Name }" 2>/dev/null | tr -d '\r' | head -3
+}
+
+# The lock cargo takes on a target dir. It lives inside the profile directory
+# (<dir>/.cargo-lock), not at the target root; a build holds it open, so an
+# exclusive open fails while anything is building there.
+lock_state() {
+  local win
+  win=$(cygpath -w "$1/.cargo-lock" 2>/dev/null || echo "$1/.cargo-lock")
+  powershell -NoProfile -Command "
+    \$p = '$win'
+    if (-not (Test-Path -LiteralPath \$p)) { 'absent'; exit 0 }
+    try { \$h = [IO.File]::Open(\$p, 'Open', 'ReadWrite', 'None'); \$h.Close(); 'free' }
+    catch { 'busy' }" 2>/dev/null | tr -d '\r'
+}
+
+candidates=()
+for entry in "$root"/*/; do
+  entry=${entry%/}
+  if is_profile "${entry##*/}"; then
+    candidates+=("$entry")
+    continue
+  fi
+  for sub in "$entry"/*/; do
+    sub=${sub%/}
+    is_profile "${sub##*/}" && candidates+=("$sub")
+  done
+done
+
+before_kb=$(free_kb "$root")
+total_mb=0
+deletable=0
+delete=()
+
+echo "disk-prune: $root, floor age ${min_age}m, mode $([ "$apply" = 1 ] && echo apply || echo 'dry run')"
+echo 'disk-prune: protected: D:\Amp\Green, vendor/, patches/, assets/, sccache; no worktree remove --force, no bare cargo clean'
+printf '%-44s %9s %6s  %s\n' "directory" "size" "age" "verdict"
+
+for dir in "${candidates[@]}"; do
+  # Only ever inside the target root, and never a source tree.
+  case $dir in
+    "$root"/*) ;;
+    *)
+      printf '%-44s %9s %6s  %s\n' "${dir#"$root"/}" "-" "-" "SKIP outside $root"
+      continue
+      ;;
+  esac
+  case $dir in
+    /d/Amp/*) printf '%-44s %9s %6s  %s\n' "$dir" "-" "-" "SKIP a checkout, not build output"; continue ;;
+    */vendor/* | */patches/* | */assets/* | *sccache*)
+      printf '%-44s %9s %6s  %s\n' "${dir#"$root"/}" "-" "-" "SKIP sources or cache"
+      continue
+      ;;
+  esac
+
+  mb=$(size_mb "$dir")
+  mb=${mb:-0}
+  age=$(age_min "$dir")
+  line=$(basename "$(dirname "$dir")")
+  [ "$line" = "$(basename "$root")" ] && line=$(basename "$dir")
+
+  if [ "$age" = "<${min_age}m" ]; then
+    printf '%-44s %6s MB %6s  %s\n' "${dir#"$root"/}" "$mb" "$age" "SKIP written within ${min_age}m"
+    continue
+  fi
+  lock=$(lock_state "$dir")
+  if [ "$lock" = "busy" ]; then
+    printf '%-44s %6s MB %6s  %s\n' "${dir#"$root"/}" "$mb" "$age" "SKIP .cargo-lock is held"
+    continue
+  fi
+  busy=$(busy_with "$dir")
+  if [ -n "$busy" ]; then
+    printf '%-44s %6s MB %6s  %s\n' "${dir#"$root"/}" "$mb" "$age" "SKIP in use by $(printf '%s' "$busy" | tr '\n' ' ')"
+    continue
+  fi
+  wt=$(worktree_of "$line")
+  if [ -n "$wt" ]; then
+    dirty=$(git -C "$wt" status --short 2>/dev/null | head -20)
+    if [ -n "$dirty" ]; then
+      n=$(printf '%s\n' "$dirty" | grep -c .)
+      printf '%-44s %6s MB %6s  %s\n' "${dir#"$root"/}" "$mb" "$age" "SKIP $wt has $n uncommitted"
+      continue
+    fi
+  fi
+
+  printf '%-44s %6s MB %6s  %s\n' "${dir#"$root"/}" "$mb" "$age" "DELETE"
+  total_mb=$((total_mb + mb))
+  deletable=$((deletable + 1))
+  delete+=("$dir")
+done
+
+printf '\ndeletable: %s director%s, %s GB\n' "$deletable" "$([ "$deletable" = 1 ] && echo y || echo ies)" \
+  "$(awk -v mb="$total_mb" 'BEGIN { printf "%.2f", mb / 1024 }')"
+
+if [ "$apply" = 0 ]; then
+  echo "dry run: nothing was deleted. rerun with --apply"
+  exit 0
+fi
+empty=$(mktemp -d)
+empty_win=$(cygpath -w "$empty" 2>/dev/null || echo "$empty")
+for dir in "${delete[@]}"; do
+  lock=$(lock_state "$dir")
+  if [ "$lock" = "busy" ]; then
+    echo "disk-prune: $dir began building after the dry run; left in place" >&2
+    exit 1
+  fi
+  # Git Bash rewrites /MIR into "C:/Program Files/Git/MIR" unless path
+  # conversion is off; robocopy then exits 16 and nothing is deleted.
+  MSYS_NO_PATHCONV=1 robocopy "$empty_win" "$(cygpath -w "$dir" 2>/dev/null || echo "$dir")" \
+    /MIR /NFL /NDL /NJH /NJS /NC /NS /R:1 /W:1 >/dev/null 2>&1
+  rc=$?
+  left=$(ls -A "$dir" 2>/dev/null | head -3)
+  if [ "$rc" -ge 8 ] || [ -n "$left" ]; then
+    echo "disk-prune: could not empty $dir (robocopy rc=$rc, left: $left)" >&2
+    exit 1
+  fi
+  rmdir "$dir" 2>/dev/null || {
+    echo "disk-prune: could not remove the empty root $dir" >&2
+    exit 1
+  }
+done
+rmdir "$empty" 2>/dev/null
+
+after_kb=$(free_kb "$root")
+echo
+echo "freed:  $(awk -v mb="$total_mb" 'BEGIN { printf "%.2f GB", mb / 1024 }') in $deletable $([ "$deletable" = 1 ] && echo directory || echo directories)"
+echo "gained: $(awk -v a="$before_kb" -v b="$after_kb" 'BEGIN { printf "%.2f GB", (b - a) / 1048576 }') of free space (before $(awk -v k="$before_kb" 'BEGIN { printf "%.1f", k / 1048576 }') GB, after $(awk -v k="$after_kb" 'BEGIN { printf "%.1f", k / 1048576 }') GB)"
+echo "freed and gained differ when something builds while this runs; both are reported."

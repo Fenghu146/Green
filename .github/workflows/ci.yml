@@ -32,8 +32,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      # The machine's own water level is 30/50 GB; a runner starts with far less
+      # disk in absolute terms, so the runner only fails when the checkout cannot build.
       - shell: bash
-        run: scripts/disk.sh 4G .
+        run: scripts/disk.sh 4G 8G .
 
   build:
     name: build
@@ -79,6 +81,12 @@ jobs:
       - if: always()
         shell: bash
         run: scripts/skips.sh tests.log
+      # The gate is the exit code: a log with only #[ignore]d tests must be
+      # green, a SKIP: line must be red. Re-run both cases on every build so
+      # a trailing command's status cannot turn this back into a false red.
+      - name: skips.sh self-test
+        shell: bash
+        run: scripts/skips-self-test.sh
 
   test-app:
     name: test green
