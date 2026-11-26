@@ -135,11 +135,13 @@ fn the_shipped_log_plugin_speaks_the_same_contract_from_node() {
     let folder = root.path().join("log");
     std::fs::create_dir_all(&folder).expect("a folder");
     std::fs::copy(source.join("log_plugin.js"), folder.join("run.js")).expect("the script");
+    // A busy Windows runner needs more than the 3 s default for Node's cold start.
     std::fs::write(
         folder.join("manifest.json"),
         format!(
             r#"{{"id": "log", "version": "0.1.0", "apiVersion": 1,
-                "extensions": [".log"], "command": ["{node}", "run.js"]}}"#
+                "extensions": [".log"], "command": ["{node}", "run.js"],
+                "timeoutMs": 10000}}"#
         ),
     )
     .expect("a manifest");
@@ -150,8 +152,11 @@ fn the_shipped_log_plugin_speaks_the_same_contract_from_node() {
     std::fs::copy(source.join("sample.log"), &log).expect("a log");
 
     let view = host.open(&log);
+    let blocks = view
+        .blocks()
+        .unwrap_or_else(|| panic!("no blocks: {view:?}"));
     assert_eq!(
-        view.blocks().expect("blocks"),
+        blocks,
         [
             Block::Alert {
                 level: AlertLevel::Warning,
