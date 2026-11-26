@@ -3,6 +3,7 @@
 pub(super) const DE: &[(&str, &str)] = &[
     ("mark.pane.files", "Dateien"),
     ("mark.math.unsupported", "\\{name} an Byte {at} steht nicht auf der Formel-Whitelist"),
+    ("mark.math.failed", "{count} Formel(n) wurden nicht gesetzt; jede zeigt ihren TeX-Quelltext"),
     ("mark.tool.insert", "Einfügen"),
     ("mark.tool.more", "Mehr"),
     ("mark.pane.outline", "Gliederung"),

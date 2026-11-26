@@ -10,6 +10,8 @@ use gpui::{
 
 use super::{OnLink, Over, drawn_text};
 use crate::{
+    literal,
+    math::baseline_in,
     theme::ActiveTheme,
     {
         tree::{Inline, Style},
@@ -39,8 +41,8 @@ pub(super) struct MathText {
     found: Over,
     shown: Rc<RefCell<Option<Shown>>>,
     text: Option<AnyElement>,
-    /// Each picture, its size, and the drawn span it covers.
-    pictures: Vec<(Arc<RenderImage>, Size<Pixels>, Range<usize>)>,
+    /// Each picture, its size, its baseline, and the drawn span it covers.
+    pictures: Vec<(Arc<RenderImage>, Size<Pixels>, Pixels, Range<usize>)>,
     /// One glue character's width.
     glue: Pixels,
 }
@@ -158,10 +160,14 @@ impl Element for MathText {
         let font = style.font_size.to_pixels(rem);
         let glue = String::from(GLUE);
         let run = style.to_run(glue.len());
-        let width = window
+        let shaped = window
             .text_system()
-            .shape_line(glue.into(), font, &[run], None)
-            .width;
+            .shape_line(glue.into(), font, &[run], None);
+        let width = shaped.width;
+        let line = style.line_height_in_pixels(rem);
+        // The formula's baseline lands on the line's text baseline; whatever
+        // it adds above or below opens the line, so nothing is clipped.
+        let (ascent, descent) = (shaped.ascent, shaped.descent);
         let mut maths: Vec<Range<usize>> = (self.inline.styles.iter())
             .filter(|(_, style)| *style == Style::Math)
             .map(|(range, _)| range.clone())
@@ -169,6 +175,7 @@ impl Element for MathText {
         maths.sort_by_key(|range| range.start);
         let (mut swaps, mut drawn_as) = (Vec::new(), Vec::new());
         let (mut pictures, mut errors) = (Vec::new(), Vec::new());
+        let mut taller = Pixels::ZERO;
         for (ix, range) in maths.into_iter().enumerate() {
             let source = SharedString::from(self.inline.text[range.clone()].to_string());
             match typeset(
@@ -178,25 +185,28 @@ impl Element for MathText {
                 window,
                 cx,
             ) {
-                Some(Ok((image, size))) => {
+                Some(Ok(glyph)) => {
+                    let (image, size, baseline) = (glyph.picture, glyph.size, glyph.baseline);
                     let count = (size.width / width).ceil().max(1.0) as usize;
                     drawn_as.push(GLUE.to_string().repeat(count));
-                    pictures.push((image, size, swaps.len()));
+                    pictures.push((image, size, baseline, swaps.len()));
                     swaps.push((range, 0..0));
+                    let above = (baseline - ascent).max(Pixels::ZERO);
+                    let below = (size.height - baseline - descent).max(Pixels::ZERO);
+                    taller = taller.max(line + above.max(below) * 2.0);
                 }
-                // The formula is the user's text: not logged.
-                Some(Err(error)) => {
-                    log::warn!("markdown: an inline formula shows as TeX, unset");
-                    drawn_as.push(format!(" ({error})"));
+                // One formula's failure stays its own: the words show as TeX.
+                Some(Err(_)) => {
+                    drawn_as.push(literal(&source));
                     errors.push(swaps.len());
-                    swaps.push((range.end..range.end, 0..0));
+                    swaps.push((range, 0..0));
                 }
                 None => {}
             }
         }
         let inline = shown(&self.inline, &mut swaps, &drawn_as);
         let hidden: Vec<Range<usize>> = (pictures.iter())
-            .map(|(_, _, ix)| swaps[*ix].1.clone())
+            .map(|(_, _, _, ix)| swaps[*ix].1.clone())
             .collect();
         let danger = HighlightStyle {
             color: Some(cx.theme().colors.danger),
@@ -214,18 +224,14 @@ impl Element for MathText {
             &self.on_link,
             cx,
         );
-        let tallest = pictures
-            .iter()
-            .map(|(_, size, _)| size.height)
-            .fold(Pixels::ZERO, Pixels::max);
         // A tall formula opens the paragraph's lines.
-        let taller = (tallest > style.line_height_in_pixels(rem)).then(|| TextStyleRefinement {
-            line_height: Some(tallest.into()),
+        let taller = (taller > line).then(|| TextStyleRefinement {
+            line_height: Some(taller.into()),
             ..TextStyleRefinement::default()
         });
         let id = window.with_text_style(taller, |window| text.request_layout(window, cx));
         self.pictures = (pictures.into_iter().zip(hidden))
-            .map(|((image, size, _), drawn)| (image, size, drawn))
+            .map(|((image, size, baseline, _), drawn)| (image, size, baseline, drawn))
             .collect();
         self.glue = width;
         *self.shown.borrow_mut() = Some(Shown { layout, swaps });
@@ -266,11 +272,20 @@ impl Element for MathText {
             return;
         };
         let line = layout.line_height();
-        for (image, size, drawn) in &self.pictures {
+        for (image, size, baseline, drawn) in &self.pictures {
             let Some((start, room)) = place(layout, drawn, self.glue) else {
                 continue;
             };
-            let origin = start + point((room - size.width) / 2.0, (line - size.height) / 2.0);
+            // On the line's own baseline, as the words beside it are.
+            let text = match layout.line_layout_for_index(drawn.start) {
+                Some(one) => baseline_in(&one, line),
+                None => line,
+            };
+            let origin = start
+                + point(
+                    (room - size.width) / 2.0,
+                    text - *baseline,
+                );
             let bounds = Bounds {
                 origin,
                 size: *size,

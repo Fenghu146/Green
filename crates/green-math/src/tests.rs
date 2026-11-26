@@ -51,7 +51,7 @@ fn the_whitelist_maps_as_the_design_table_says() {
     assert_eq!(typst("\\le"), "lt.eq");
     assert_eq!(typst("x^{2}"), "x^2");
     assert_eq!(typst("x^{n-1}"), "x^(n - 1)");
-    assert!(typst("\\boxed{x}").starts_with("#box("));
+    assert_eq!(typst("\\boxed{x}"), "#gbox[$x$]");
 }
 
 #[test]

@@ -12,15 +12,15 @@ use crate::{
 };
 
 const KEPT: u32 = bit(Style::Code) | bit(Style::Math);
-const CODE: u32 = 1 << 9;
-const MATH: u32 = 1 << 10;
-const HTML: u32 = 1 << 11;
-const TOC: u32 = 1 << 12;
-const BREAK: u32 = 1 << 13;
+const CODE: u32 = 1 << 11;
+const MATH: u32 = 1 << 12;
+const HTML: u32 = 1 << 13;
+const TOC: u32 = 1 << 14;
+const BREAK: u32 = 1 << 15;
 /// Where a heading's depth, then an alert's kind, sit.
-const DEPTH: u32 = 14;
+const DEPTH: u32 = 16;
 const DEPTHS: u32 = 0b111 << DEPTH;
-const ALERT: u32 = 17;
+const ALERT: u32 = 19;
 /// A mark whose block may take any depth.
 const LOOSE: u32 = 1 << 20;
 /// The level `at` gives a paragraph drawn as contents.

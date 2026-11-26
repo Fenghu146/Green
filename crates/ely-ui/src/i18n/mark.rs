@@ -3,6 +3,7 @@
 pub(super) const EN: &[(&str, &str)] = &[
     ("mark.pane.files", "Files"),
     ("mark.math.unsupported", "\\{name} at byte {at} is not in the formula whitelist; adding it to green-math's whitelist makes it render"),
+    ("mark.math.failed", "{count} formula(s) did not typeset; each shows its TeX instead"),
     ("mark.tool.insert", "Insert"),
     ("mark.tool.more", "More"),
     ("mark.pane.outline", "Outline"),
@@ -109,6 +110,7 @@ pub(super) const EN: &[(&str, &str)] = &[
 pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("mark.pane.files", "文件"),
     ("mark.math.unsupported", "公式里的 \\{name} 不在白名单（第 {at} 个字节）；把它加进 green-math 的白名单就能渲染"),
+    ("mark.math.failed", "{count} 条公式没能渲染，已显示为 $…$ 源码"),
     ("mark.tool.insert", "插入"),
     ("mark.tool.more", "更多"),
     ("mark.pane.outline", "大纲"),

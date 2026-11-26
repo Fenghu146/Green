@@ -48,14 +48,15 @@ pub fn bytes() -> Result<Vec<Vec<u8>>> {
         .collect()
 }
 
-/// Registers them with GPUI; the family must be there after.
+/// Registers them with GPUI and starts Typst on the same faces; the family
+/// must be there after.
 pub fn install(cx: &App) -> Result<()> {
-    let fonts = bytes()?
-        .into_iter()
-        .map(Cow::Owned)
-        .collect::<Vec<_>>();
-    log::info!("fonts: {} files from {}", fonts.len(), dir().display());
-    cx.text_system().add_fonts(fonts)?;
+    let bytes = bytes()?;
+    let faces = faces(&bytes)?;
+    let book = typst::text::FontBook::from_fonts(&faces);
+    log::info!("fonts: {} files from {}", bytes.len(), dir().display());
+    cx.text_system()
+        .add_fonts(bytes.into_iter().map(Cow::Owned).collect())?;
     for family in [FAMILY, MONO, MATH] {
         anyhow::ensure!(
             cx.text_system().all_font_names().iter().any(|name| *name == *family),
@@ -63,19 +64,24 @@ pub fn install(cx: &App) -> Result<()> {
             dir().display()
         );
     }
-    log::info!("fonts: Typst reads {} families from the same files", book()?.families().count());
+    log::info!("fonts: Typst reads {} families from the same files", book.families().count());
+    ely_gpui_component::documents::start_math(faces).map_err(anyhow::Error::msg)?;
     Ok(())
 }
 
 /// The same files for Typst, which lays out formulas and the export.
 pub fn book() -> Result<typst::text::FontBook> {
-    let fonts = FILES
+    Ok(typst::text::FontBook::from_fonts(&faces(&bytes()?)?))
+}
+
+/// The faces Typst reads, in `FILES` order.
+pub fn faces(bytes: &[Vec<u8>]) -> Result<Vec<typst::text::Font>> {
+    FILES
         .iter()
-        .zip(bytes()?)
+        .zip(bytes)
         .map(|(name, data)| {
-            typst::text::Font::new(typst::foundations::Bytes::new(data), 0)
+            typst::text::Font::new(typst::foundations::Bytes::new(data.clone()), 0)
                 .with_context(|| format!("{name} is not a font Typst reads"))
         })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(typst::text::FontBook::from_fonts(&fonts))
+        .collect()
 }

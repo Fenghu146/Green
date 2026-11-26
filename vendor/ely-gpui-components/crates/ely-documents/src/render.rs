@@ -37,8 +37,19 @@ use select::{Gather, OnMenu, Selection};
 use style::highlight;
 pub(crate) use table::{CellAt, OpenCell};
 
+/// `inline`'s words with its formulas typeset, for a title drawn outside a
+/// block, such as an outline's row.
+pub fn inline_math(id: impl Into<ElementId>, inline: &Inline) -> AnyElement {
+    let (drawn, _) = math_text::MathText::new(id.into(), inline.clone(), (None, None), Vec::new());
+    drawn.into_any_element()
+}
+
 /// Line height against the text size.
 pub(crate) const LINE: f32 = 1.6;
+
+/// Past this many bytes a paragraph draws without decoration or soft wrapping
+/// (design §9, the single-paragraph case).
+const LONGEST_DECORATED: usize = 20_000;
 
 pub(crate) type OnLink = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 /// Reveals the heading whose source starts at a byte.
@@ -250,6 +261,17 @@ impl Draw<'_> {
     }
 
     fn inline(&self, inline: &Inline, cx: &App) -> AnyElement {
+        // design §9 step 1: a paragraph this long draws plain and unbroken —
+        // no decoration, no soft wrapping — so one keystroke does not re-break
+        // sixty thousand characters. A press still opens its source.
+        if inline.text.len() > LONGEST_DECORATED {
+            let styled = StyledText::new(inline.text.clone());
+            let drawn = div()
+                .whitespace_nowrap()
+                .child(styled)
+                .into_any_element();
+            return self.point_text(drawn, |_| 0, inline);
+        }
         let links = (!inline.links.is_empty()).then(|| self.key("links"));
         let found = (self.hooks.found).map_or_else(Vec::new, |found| found.inline(inline));
         let washed = !found.is_empty();

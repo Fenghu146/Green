@@ -319,8 +319,13 @@ impl Side {
         }
         let outline = headings.iter().enumerate().fold(
             Outline::new("mark-outline"),
-            |outline, (at, heading)| {
-                outline.item(at.to_string(), heading.title.clone(), heading.level)
+            |outline, (at, heading)| match heading.has_math() {
+                true => outline.drawn(
+                    at.to_string(),
+                    heading.level,
+                    ely_gpui_component::documents::inline_math(("mark-outline-math", at), &heading.runs),
+                ),
+                false => outline.item(at.to_string(), heading.title.clone(), heading.level),
             },
         );
         let outline = outline.on_select(move |key, window, cx| {

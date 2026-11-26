@@ -8,8 +8,10 @@ use crate::markdown::span;
 pub struct DocumentHeading {
     /// Its level, 1 to 6.
     pub depth: u8,
-    /// Its text.
+    /// Its text, as written: fold keys, search and a reader's name use it.
     pub title: String,
+    /// Its text as drawn, formulas and all, for an outline that shows them.
+    pub runs: super::Inline,
     /// Where its source starts, in bytes.
     pub at: usize,
 }

@@ -105,6 +105,31 @@ const OPERATORS: &[&str] = &[
     "gt",
 ];
 
+/// The families formulas set their glyphs in: the math face, then the CJK one
+/// `\text{…}` and bare Chinese fall back to.
+pub const MATH_FONTS: &str = "(\"Noto Sans Math\", \"Noto Sans CJK SC\")";
+
+/// The rule the editor's preamble and the export's both set maths with.
+///
+/// `EquationElem` forces its own font list on math, so a `#set text(font: …)`
+/// outside this rule never reaches it. The two edges matter for formulas set
+/// among words: without them the page box clips parentheses and descenders.
+pub fn math_rule() -> String {
+    format!(
+        "#show math.equation: set text(font: {MATH_FONTS}, \
+         top-edge: \"bounds\", bottom-edge: \"bounds\")"
+    )
+}
+
+/// `#gbox`'s one definition, the frame in `stroke` (`#rrggbb`).
+///
+/// The converter writes `#gbox[…]` and nothing else: a box's width, inset,
+/// radius and colour are the preamble's, so the editor and the export agree
+/// and a theme change moves both.
+pub fn gbox_rule(stroke: &str) -> String {
+    format!("#let gbox(body) = box(stroke: 0.6pt + rgb(\"{stroke}\"), inset: 3pt, radius: 1pt, body)")
+}
+
 /// The whitelist, for the message an unsupported command gets.
 pub fn whitelisted(name: &str) -> bool {
     SYMBOLS.iter().any(|(known, _)| *known == name)
@@ -268,7 +293,8 @@ impl<'a> Reader<'a> {
             },
             "boxed" => {
                 let inner = self.atom();
-                format!("#box(stroke: 0.6pt, inset: 3pt, radius: 1pt)[${inner}$]")
+                // The frame's style is the preamble's: this layer knows no theme.
+                format!("#gbox[${inner}$]")
             }
             // Typst sizes delimiters by itself; the parens stay.
             "left" => {

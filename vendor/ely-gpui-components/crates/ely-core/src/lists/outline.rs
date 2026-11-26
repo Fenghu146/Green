@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    Animation, AnimationExt, App, ElementId, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::*,
+    Animation, AnimationExt, AnyElement, App, ElementId, FontWeight, InteractiveElement,
+    IntoElement, ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled,
+    Window, div, prelude::*,
 };
 
 use crate::{
@@ -12,6 +12,12 @@ use crate::{
 };
 
 type OnKey = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
+
+/// A heading's title: the words it was written with, or the drawing of them.
+enum Title {
+    Text(SharedString),
+    Drawn(AnyElement),
+}
 
 /// A document's headings, each level stepping in, beside a rail whose marker glides to the section in view. A press asks the owner to go there; the owner says which is current.
 ///
@@ -27,7 +33,7 @@ type OnKey = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
 #[derive(IntoElement)]
 pub struct Outline {
     id: ElementId,
-    items: Vec<(SharedString, SharedString, usize)>,
+    items: Vec<(SharedString, Title, usize)>,
     current: Option<SharedString>,
     on_select: Option<OnKey>,
 }
@@ -51,7 +57,21 @@ impl Outline {
         level: usize,
     ) -> Self {
         assert!(level >= 1, "heading levels start at one");
-        self.items.push((key.into(), title.into(), level));
+        self.items
+            .push((key.into(), Title::Text(title.into()), level));
+        self
+    }
+
+    /// A heading under `key`, drawn rather than written: a title whose
+    /// formulas typeset, at the size the tree draws.
+    pub fn drawn(
+        mut self,
+        key: impl Into<SharedString>,
+        level: usize,
+        title: AnyElement,
+    ) -> Self {
+        assert!(level >= 1, "heading levels start at one");
+        self.items.push((key.into(), Title::Drawn(title), level));
         self
     }
 
@@ -114,6 +134,10 @@ impl RenderOnce for Outline {
             .map(|(ix, (key, title, level))| {
                 let here = self.current.as_ref() == Some(&key);
                 let (select, id) = (on_select.clone(), self.id.clone());
+                let title = match title {
+                    Title::Text(title) => div().child(title).into_any_element(),
+                    Title::Drawn(title) => title,
+                };
                 div()
                     .id((self.id.clone(), format!("item-{key}")))
                     .relative()

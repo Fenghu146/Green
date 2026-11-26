@@ -43,6 +43,10 @@ pub enum Style {
     Underline,
     /// A highlighted run, as `<mark>`.
     Mark,
+    /// A pass mark, drawn as the export's green check.
+    Pass,
+    /// A fail mark, drawn as the export's red cross.
+    Fail,
 }
 
 /// Inline text, its styled stretches and link addresses.
@@ -192,10 +196,14 @@ impl<'a> Reader<'a> {
         };
         reader.headings = headings
             .into_iter()
-            .map(|(heading, at)| DocumentHeading {
-                depth: heading.depth,
-                title: reader.inline(&heading.children).text,
-                at,
+            .map(|(heading, at)| {
+                let runs = reader.inline(&heading.children);
+                DocumentHeading {
+                    depth: heading.depth,
+                    title: runs.text.clone(),
+                    runs,
+                    at,
+                }
             })
             .collect();
         // Titles read on one line; the body as asked.
@@ -245,7 +253,7 @@ impl<'a> Reader<'a> {
                         Drawn::Image(index, link) => after.extend(image(&images, index, link)),
                     }
                 }
-                out.push(Node::Heading(heading.depth, text));
+                out.push(Node::Heading(heading.depth, marks(text)));
                 out.extend(after);
             }
             mdast::Node::Blockquote(quote) => out.push(Node::Quote(self.nested(&quote.children))),
@@ -349,7 +357,7 @@ impl<'a> Reader<'a> {
                 text = drawn;
             }
         }
-        marked(text)
+        marks(marked(text))
     }
 
     /// Inline nodes as the HTML GitHub writes, images set aside.
@@ -486,6 +494,59 @@ fn wrapped(out: &mut Written, name: &str, attributes: &str, text: &str) {
 
 /// Text left between images, unless it is blank.
 
+/// `✅`/`❌` draw as the green check and the red cross the export draws: no
+/// bundled face has the emoji, and the editor and the PDF must look alike.
+fn marks(inline: Inline) -> Inline {
+    if !inline.text.contains(['✅', '❌']) {
+        return inline;
+    }
+    let Inline {
+        text,
+        styles,
+        links,
+        sources,
+    } = inline;
+    let mut out = String::with_capacity(text.len());
+    // Where each written byte lands in the drawn text; one past the end too.
+    let mut moved = Vec::with_capacity(text.len() + 1);
+    let mut added = Vec::new();
+    for ch in text.chars() {
+        moved.push(out.len());
+        let (drawn, style) = match ch {
+            '✅' => ('✓', Style::Pass),
+            '❌' => ('×', Style::Fail),
+            other => {
+                out.push(other);
+                continue;
+            }
+        };
+        let start = out.len();
+        out.push(drawn);
+        added.push((start..out.len(), style));
+    }
+    moved.push(out.len());
+    let end = out.len();
+    let at = |place: usize| moved.get(place).copied().unwrap_or(end);
+    let mut styles: Vec<(Range<usize>, Style)> = (styles)
+        .into_iter()
+        .map(|(range, style)| (at(range.start)..at(range.end), style))
+        .collect();
+    styles.extend(added);
+    styles.sort_by_key(|(range, _)| range.start);
+    Inline {
+        text: out,
+        styles,
+        links: (links)
+            .into_iter()
+            .map(|(range, url)| (at(range.start)..at(range.end), url))
+            .collect(),
+        sources: (sources)
+            .into_iter()
+            .map(|(start, span, escapes)| (at(start), span, escapes))
+            .collect(),
+    }
+}
+
 /// `==marked==` text: the markers leave the drawing, the run is a `Mark`.
 fn marked(mut inline: Inline) -> Inline {
     let text = inline.text.clone();
@@ -557,7 +618,7 @@ fn marked(mut inline: Inline) -> Inline {
 }
 
 fn text_block(text: Inline, out: &mut Vec<Node>) {
-    let text = marked(text);
+    let text = marks(marked(text));
     if !text.text.trim().is_empty() {
         out.push(Node::Paragraph(text));
     }

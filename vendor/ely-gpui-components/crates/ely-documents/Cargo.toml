@@ -27,11 +27,15 @@ log.workspace = true
 mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false }
 html5ever = "0.39"
-ratex-layout = "0.1.14"
-ratex-parser = "0.1.14"
-ratex-svg = { version = "0.1.14", features = ["embed-fonts"] }
-ratex-types = "0.1.14"
+green-math = { path = "../../../../crates/green-math" }
 regex.workspace = true
+resvg = "0.46"
+tiny-skia = "0.11"
+# `Page`/`PagedDocument` live in typst-layout, not typst: keep every typst on
+# one patch, or two typst-library crates meet and their types do not.
+typst = "=0.15.1"
+typst-layout = "=0.15.1"
+typst-svg = "=0.15.1"
 similar = { version = "3.2", default-features = false, features = ["std", "text", "inline", "unicode"] }
 smallvec.workspace = true
 unicode-segmentation.workspace = true

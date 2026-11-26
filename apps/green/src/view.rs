@@ -59,8 +59,20 @@ impl Mode {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Heading {
     pub level: usize,
+    /// The heading's text as written: search and a reader's name use it.
     pub title: String,
+    /// The same text as drawn, formulas and all.
+    pub runs: ely_gpui_component::documents::Inline,
     pub line: usize,
+}
+
+impl Heading {
+    /// Whether its title holds a formula, which draws instead of the source.
+    pub fn has_math(&self) -> bool {
+        (self.runs.styles)
+            .iter()
+            .any(|(_, style)| *style == ely_gpui_component::documents::Style::Math)
+    }
 }
 
 /// The caret and the first line in view.
@@ -195,6 +207,7 @@ impl MarkView {
             .map(|(heading, line)| Heading {
                 level: usize::from(heading.depth),
                 title: heading.title,
+                runs: heading.runs,
                 line,
             })
             .collect()
