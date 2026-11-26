@@ -302,6 +302,14 @@ impl Desk {
         self.active_tab().map(|tab| tab.view.clone())
     }
 
+    /// The first tab's view has drawn its document; a capture waits for this.
+    pub(crate) fn shown(&self, cx: &App) -> bool {
+        self.core
+            .tabs
+            .first()
+            .is_some_and(|tab| tab.view.read(cx).shown)
+    }
+
     /// Asks for files; each opens in its own tab.
     fn open_picked(&mut self, _: &commands::Open, _: &mut Window, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(PathPromptOptions {

@@ -5,8 +5,10 @@
   window, then ends it.
 
 .DESCRIPTION
-  The fallback for pictures of a real window: `green --capture` (docs/capture-mode.md)
-  is the quiet way whenever the frame itself is all that is wanted.
+  TEMPORARY. `green --capture` (docs/capture-mode.md) shows no window at all and
+  writes the same pixels byte for byte; use it instead once it has landed. This
+  script stays only for pictures of a real window (decorations, dragging, real
+  input focus), which `--capture` cannot express.
 
   The point here is one thing: GetForegroundWindow() reads the same before and
   after. The picture comes from the window itself (PrintWindow), never from the

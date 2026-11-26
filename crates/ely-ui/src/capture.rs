@@ -18,25 +18,31 @@ pub struct Shot {
     pub output: PathBuf,
     /// Logical pixels; the frame comes back at the platform's scale.
     pub size: Size<Pixels>,
-    /// How long the document draws before the picture is taken: Typst sets formulas in the
-    /// background, so the first frame is often not the finished one.
-    pub settle: Duration,
+    /// How long to wait for the picture to settle; past it the run fails rather than
+    /// writing a frame that may still be moving.
+    pub timeout: Duration,
 }
 
-/// Opens `files` in a window that is never shown, renders it, writes `shot.output`.
+/// One frame of `files`, written to `shot.output`; the exit code says how it went.
 ///
-/// Returns the exit code: 0 when a non-blank frame was written, 3 when this machine cannot
-/// render, 4 when no frame came back in time, 5 when the picture was blank or not written.
+/// `ready` says whether the document has drawn itself yet: frames before that are the
+/// startup scene or an empty shell, and two of those can be identical, so a picture is only
+/// taken once the document is in.
+///
+/// Returns 0 when a settled, non-blank frame was written; 3 when this machine cannot render;
+/// 4 when no frame settled in time; 5 when the picture was blank or not written.
 pub fn run<V: Render>(
     app: AppId,
     shot: Shot,
     files: Vec<PathBuf>,
     root: impl FnOnce(AppId, &mut Window, &mut App) -> Entity<V> + 'static,
+    ready: impl Fn(&App) -> bool + 'static,
 ) -> i32 {
     if let Err(error) = graphics::check() {
         eprintln!("capture: this machine cannot render: {error:#}");
         return BACKEND;
     }
+    let ready: Rc<dyn Fn(&App) -> bool> = Rc::new(ready);
     let code = Rc::new(Cell::new(TIMEOUT));
     let application = gpui_platform::application().with_assets(Assets);
     {
@@ -61,6 +67,7 @@ pub fn run<V: Render>(
             let opened = cx.open_window(options, move |window, cx| {
                 log::info!("capture: the window is built");
                 let root = root(app, window, cx);
+                park(window);
                 // As in a window the platform draws: the first frame has shown, so the
                 // startup scene may leave for the document.
                 ely_platform::startup::started();
@@ -76,45 +83,11 @@ pub fn run<V: Render>(
                     return;
                 }
             };
-            let settle = shot.settle;
+            let timeout = shot.timeout;
             let output = shot.output.clone();
+            let ready = ready.clone();
             cx.spawn(async move |cx| {
-                cx.background_executor().timer(settle).await;
-                // The platform never draws a window that is not shown, so the frames are
-                // drawn here: layout and paint, then the pixels read back.
-                let mut frame = None;
-                let mut said = Ok(());
-                for _ in 0..6 {
-                    let drew = cx.update(|cx| {
-                        cx.update_window(handle, |_, window, cx| {
-                            window.draw(cx).clear(cx);
-                            let size = window.viewport_size();
-                            (size, window.render_to_image())
-                        })
-                    });
-                    match drew {
-                        Ok((size, Ok(image))) => {
-                            log::info!("capture: a frame at {size:?}");
-                            frame = Some(image);
-                        }
-                        Ok((_, Err(error))) => {
-                            said = Err((BACKEND, format!("no frame came back: {error:#}")));
-                            break;
-                        }
-                        Err(error) => {
-                            said = Err((TIMEOUT, format!("the window went before its frame: {error:#}")));
-                            break;
-                        }
-                    }
-                    cx.background_executor()
-                        .timer(Duration::from_millis(250))
-                        .await;
-                }
-                let said = match (said, frame) {
-                    (Err(said), _) => Err(said),
-                    (Ok(()), Some(image)) => save(&image, &output),
-                    (Ok(()), None) => Err((TIMEOUT, "no frame was drawn".to_string())),
-                };
+                let said = settled_frame(cx, handle, &output, timeout, ready.as_ref()).await;
                 match said {
                     Ok(()) => code.set(0),
                     Err((exit, said)) => {
@@ -128,6 +101,108 @@ pub fn run<V: Render>(
         });
     }
     code.get()
+}
+
+/// Draws until two frames in a row are the same, then writes that frame.
+///
+/// The platform never draws a window it does not show, so every frame here is drawn by hand.
+/// A picture is only taken once the document is in, the frame has had time for work the app
+/// starts after it shows (Typst sets formulas in the background), and two frames agree: a
+/// frame the engine is still changing is not a picture of anything repeatable.
+async fn settled_frame(
+    cx: &mut gpui::AsyncApp,
+    handle: gpui::AnyWindowHandle,
+    output: &PathBuf,
+    timeout: Duration,
+    ready: &dyn Fn(&App) -> bool,
+) -> Result<(), (i32, String)> {
+    // Before this, two equal frames can mean "nothing has happened yet".
+    const SETTLE: Duration = Duration::from_millis(600);
+    let started = std::time::Instant::now();
+    let mut shown_at: Option<std::time::Instant> = None;
+    let mut last: Option<image::RgbaImage> = None;
+    let mut drawn = 0u32;
+    loop {
+        if started.elapsed() >= timeout {
+            return Err((
+                TIMEOUT,
+                format!(
+                    "no frame settled within {} ms ({drawn} frames drawn)",
+                    timeout.as_millis()
+                ),
+            ));
+        }
+        let drew = cx.update(|cx| {
+            cx.update_window(handle, |_, window, cx| {
+                window.draw(cx).clear(cx);
+                let size = window.viewport_size();
+                (size, ready(cx), window.render_to_image())
+            })
+        });
+        let frame = match drew {
+            Ok((size, ready, Ok(image))) => {
+                drawn += 1;
+                log::info!("capture: frame {drawn} at {size:?}, the document shown {ready}");
+                Some((ready, image))
+            }
+            Ok((_, _, Err(error))) => return Err((BACKEND, format!("no frame came back: {error:#}"))),
+            Err(error) => return Err((TIMEOUT, format!("the window went before its frame: {error:#}"))),
+        };
+        if let Some((true, image)) = frame {
+            let at = *shown_at.get_or_insert_with(std::time::Instant::now);
+            // Two frames in a row the same, after the work the document starts has had time.
+            let after_settle = at.elapsed() >= SETTLE;
+            if after_settle && last.as_ref().is_some_and(|before| before.as_raw() == image.as_raw()) {
+                return save(&image, output);
+            }
+            last = Some(image);
+        } else {
+            // Before the document shows, nothing is a picture of the document.
+            last = None;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
+}
+
+/// Puts the never-shown window off every display, so the pointer is never over it.
+///
+/// A block under the pointer draws a hover highlight, and that would make the same command
+/// write different pixels depending on where the user left their mouse. The window is never
+/// shown, so moving it costs nothing.
+#[cfg(windows)]
+fn park(window: &Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+    };
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return log::error!("capture: the window has no handle to park");
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return log::error!("capture: the window is not a Win32 window");
+    };
+    // SAFETY: a live window; the size and z-order stay as they are, and it stays hidden.
+    let moved = unsafe {
+        SetWindowPos(
+            handle.hwnd.get() as _,
+            std::ptr::null_mut(),
+            -32000,
+            -32000,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
+    if moved == 0 {
+        log::error!("capture: the window was not parked off screen");
+    }
+}
+
+#[cfg(not(windows))]
+fn park(window: &Window) {
+    let _ = window;
 }
 
 /// The settings, fonts and theme a window needs; a capture leaves out storage and updates.

@@ -25,7 +25,7 @@ green --capture out.png [--theme light|dark] [--width N] [--height N] [--wait-ms
 | `--capture <path>` | 无 | 出现即进入截图模式；父目录不存在即报错，不自动创建 |
 | `--theme light\|dark` | `light` | 没有桌面可问系统，`system` 直接拒绝 |
 | `--width` / `--height` | 1400 / 900 | 逻辑像素；PNG 尺寸 = 逻辑 × 平台缩放（本机 170% → 2374×1378） |
-| `--wait-ms` | 2500 | 开窗后等文档排完再取图的时间 |
+| `--wait-ms` | 8000 | 最多等画面收敛这么久；超过即失败，不拿最后一帧充数 |
 | `<file.md>` | 无 | 恰好一个位置参数 |
 
 退出码：0 写好 PNG；2 参数错（含"这个构建没有 capture"）；3 这台机器没有可用渲染后端；4 窗口没画出来；5 写盘失败或截到空白帧（空白帧改存 `<out>.blank.png`）。
@@ -36,9 +36,10 @@ green --capture out.png [--theme light|dark] [--width N] [--height N] [--wait-ms
 
 1. **入口**：`apps/green/src/main.rs` 在 `remote::command_line()` 之前认 `--capture`，交给 `apps/green/src/capture.rs`（解析参数、设环境变量），再由 `crates/ely-ui/src/capture.rs` 跑。
 2. **窗口**：走与正常启动同一串安装（字体、组件库、设置、主题、i18n、键位、`shell::want_scene()`），同一个 root（`desk::open`），只把 `WindowOptions` 换成 `show: false, focus: false`，尺寸取 `--width/--height`。文件经 `opening::install_launch_files` 交给 root，和正常启动的 `launch_files` 是同一条路。
-3. **帧从哪来**：平台的帧循环**不会**给没显示过的窗口画帧（第一版只截到启动画面与背景色）。所以截图的帧自己画：`window.draw(cx)` 连续 6 次、每次隔 250 ms，最后一次的 scene 用 `Window::render_to_image()` 交给 DirectX 渲染器离屏读回。
+3. **帧从哪来**：平台的帧循环**不会**给没显示过的窗口画帧（第一版只截到启动画面与背景色）。所以截图的帧自己画：`window.draw(cx)` 之后用 `Window::render_to_image()` 交给 DirectX 渲染器离屏读回，隔 100 ms 再画下一帧。
 4. **启动画面要撤**：`shell` 的启动画面在 `startup::started()` 之后才离开。正常启动由平台的"下一帧回调"打这个标记；截图路径在开窗后直接调用 `ely_platform::startup::started()` 并 `refresh()`，画面才会换成文档。
-5. **离屏读回靠基座**：`Window::render_to_image()` 在 gpui 的 `test-support` 特性下，Windows 侧接到 `WindowsWindow` 的 `render_to_image`（D3D 渲染器渲染到离屏目标再读回，**不 Present**）。因此 `ely-ui` 有 `capture` 特性（`gpui/test-support` + `gpui_windows/test-support`），`green` 有 `capture = ["ely-ui/capture"]`；发行包不开，体积与代码面不变。
+5. **收敛判定**（替掉固定等待）：每帧记下像素，**连续两帧完全相同**即取这一帧落盘——前提是（a）文档已画出来（`Desk::shown`：首个标签的视图报过显示），（b）距文档出现已过 600 ms。两个前提针对同一种假收敛：文档还没到手、公式还在排时，"两帧一样"只是"什么都还没发生"。超过 `--wait-ms` 仍不收敛即 `exit 4`，**不写文件**，绝不拿最后一帧充数。
+6. **离屏读回靠基座**：`Window::render_to_image()` 在 gpui 的 `test-support` 特性下，Windows 侧接到 `WindowsWindow` 的 `render_to_image`（D3D 渲染器渲染到离屏目标再读回，**不 Present**）。因此 `ely-ui` 有 `capture` 特性（`gpui/test-support` + `gpui_windows/test-support`），`green` 有 `capture = ["ely-ui/capture"]`；发行包不开，体积与代码面不变。
 
 ```text
 cargo run -p green --features capture -- --capture out.png --theme dark doc.md
@@ -52,9 +53,10 @@ cargo run -p green --features capture -- --capture out.png --theme dark doc.md
 
 | 项 | 结果 |
 | --- | --- |
-| 一帧的时间 | 5–7 s（启动 1 s + `--wait-ms` 2.5 s + 6 帧 1.5 s） |
+| 一次的时间 | `quiet-doc.md`（含 2 条行内、2 条块级公式）4.3–4.8 s，收敛于第 4 帧；首帧到收敛约 1 s |
 | 内容 | 标题、正文、代码块、列表、**行内与块级公式**（Typst 已排好）都在 |
-| 同一命令两次 | PNG 逐字节相同（SHA-256 一致） |
+| 同一命令两次 | PNG 逐字节相同（SHA-256 一致，`2D767A17…`；换成收敛判定后仍是同一个哈希） |
+| 超时 | `--wait-ms 400` → `exit 4`、"no frame settled within 400 ms (2 frames drawn)"，**没有写文件** |
 | 前台窗口 | 启动前 / 运行中 / 结束后同一个 `GetForegroundWindow()` |
 | 屏幕上 | 用户视角截屏里没有它的窗口；`EnumWindows` 看得到 `class=Zed::Window visible=False`，全程 `visible` 一次都没有 |
 | 亮/暗主题 | 都正确（背景 `#FCFAF7` / `#252525`） |
@@ -63,10 +65,10 @@ cargo run -p green --features capture -- --capture out.png --theme dark doc.md
 
 ## 5. 还没做
 
-- **整页**（`--full-page`）：现在只出首屏。整页要先量内容高度、再开一扇够高的窗（gpui 的 `list` 只建可见行），Windows 的 D3D11 纹理上限 16384 px，超了要竖直分块。参数先不接受，传了即 `exit 2`。
+- **整页**（`--full-page`）：现在只出首屏，参数传了即 `exit 2`。整页要等主线之后做，记在 `later.md`。
 - **源码模式**（`--mode source|visual`）：现在固定可视。
-- **等到"安静"再截**：gpui 不对外给"这帧之后没有新请求"的信号，现在是固定 `--wait-ms` + 6 帧；文档里的图片、Mermaid 慢到超过这个时间就会截到未完成的一帧。
-- **CI 接线**：GitHub Actions 的 Windows runner 有 WARP（软件 D3D），理论可跑；未在本仓库的 CI 上验证。
+- **图片 / Mermaid 的完备**：收敛判定只保证"画面不再变"，不保证"该出现的都出现了"。文档里的图片和 Mermaid 若在 600 ms 之后才开始变，会先被当成稳定；600 ms 这个下限就是用来压低这类误判的，不是证明。
+- **CI 接线**：见 `docs/capture-mode.md` 的 CI 一节（验证结果决定接不接）。
 
 ## 6. 和 `scripts/launch-quiet.ps1` 的分工
 
@@ -79,6 +81,11 @@ cargo run -p green --features capture -- --capture out.png --theme dark doc.md
 - **真离屏**：`NSView.bitmapImageRepForCachingDisplay(in:)` + `cacheDisplay(in:to:)` 能把任意视图层级画进 `NSBitmapImageRep`，不需要窗口；但 Green 在 macOS 是把场景画进 `CAMetalLayer`，所以该走 gpui 的 `MetalHeadlessRenderer`（`gpui_platform::current_headless_renderer()` 的 macOS 分支），与 §2 的 Windows 路径同构。
 - 结论：Mac 上"完全不可见 + 内容正确"本来就不难，因为 Metal 离屏渲染不需要窗口；未在真机上验证。
 
-## 8. 为什么不是虚拟桌面
+## 8. Windows 事实（实测，勿重跑）
 
-实测（同机、同日）：**后台进程新建的窗口落在启动那一刻活动的虚拟桌面上**（用户在第 2 个桌面时启动，窗口就出现在第 2 个桌面），并在之后停留在那里。而公开的 `IVirtualDesktopManager` 只能**读**（`IsWindowOnCurrentVirtualDesktop`、`GetWindowDesktopId` 跨进程可用），**不能把别的进程的窗口搬到指定桌面**（`MoveWindowToDesktop` 对 green.exe 的窗口返回 `E_ACCESSDENIED`，对自己的窗口可以）。所以"工作留桌面一、用户去桌面二"这个安排只在窗口创建时用户还在桌面一时成立，不能靠事后搬窗口补救；未公开接口的 IID 随版本变，不写死。这也是 `--capture` 成为唯一干净答案的原因。
+2026-11-26，Windows 11 build 26200，本机。这两条已经跑过，别再花时间验证：
+
+1. **新建窗口落在启动那一刻活动的虚拟桌面上，之后不动。** 同一台机器三次启动时用户都在第 2 个桌面（index 1），窗口就落在 index 1（`IsWindowOnCurrentVirtualDesktop=1`）；更早一次当前在 index 0，窗口同样落在 index 0。所以"用户在桌面二干活、Green 在桌面一跑"只在**窗口创建时用户还在桌面一**的情况下成立：创建后再切走，窗口留在原处；创建时用户已在桌面二，窗口就出现在他那边（`ELY_SMOKE=hold` 仍不抢焦点）。
+2. **`MoveWindowToDesktop` 不能搬别的进程的窗口。** 对 green.exe 的窗口返回 `E_ACCESSDENIED`（对本进程自己的窗口可以，返回 `S_OK` 且 `IsWindowOnCurrentVirtualDesktop` 随之为 0）。读的一侧跨进程可用：`IsWindowOnCurrentVirtualDesktop`、`GetWindowDesktopId`；桌面清单从 `HKCU\...\Explorer\VirtualDesktops\VirtualDesktopIDs`（显示顺序，每 16 字节一个 GUID）与 `CurrentVirtualDesktop` 读，不需要 COM。
+
+所以"事后把窗口搬回桌面一"这条路不成立；未公开接口的 IID 随版本变，不硬码。这也是 `--capture` 成为唯一干净答案的原因。

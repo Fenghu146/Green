@@ -51,7 +51,7 @@ fn parse(args: &[String]) -> Result<Request, String> {
     let mut theme = None;
     let mut width = 1400.0;
     let mut height = 900.0;
-    let mut settle = Duration::from_millis(2500);
+    let mut settle = Duration::from_millis(8000);
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let mut value = |name: &str| -> Result<String, String> {
@@ -125,9 +125,30 @@ fn execute(request: Request) -> i32 {
     let shot = ely_ui::capture::Shot {
         output: request.output,
         size: gpui::size(gpui::px(request.width), gpui::px(request.height)),
-        settle: request.settle,
+        timeout: request.settle,
     };
-    let code = ely_ui::capture::run(ely_platform::AppId::Mark, shot, vec![file], crate::desk::open);
+    // The root hands back its desk, so the capture can tell when the document has drawn.
+    let held: std::rc::Rc<std::cell::RefCell<Option<gpui::Entity<crate::desk::Desk>>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
+    let put = held.clone();
+    let root = move |app: ely_platform::AppId, window: &mut gpui::Window, cx: &mut gpui::App| {
+        let data = match ely_platform::data_dir(app) {
+            Ok(data) => data,
+            Err(error) => {
+                eprintln!("green --capture: a folder of its own is not there: {error:#}");
+                std::process::exit(5);
+            }
+        };
+        let (root, desk) = crate::desk::open_in(app, data, window, cx);
+        *put.borrow_mut() = Some(desk);
+        root
+    };
+    let ready = move |cx: &gpui::App| {
+        held.borrow()
+            .as_ref()
+            .is_some_and(|desk| desk.read(cx).shown(cx))
+    };
+    let code = ely_ui::capture::run(ely_platform::AppId::Mark, shot, vec![file], root, ready);
     let _ = std::fs::remove_dir_all(&data);
     code
 }
