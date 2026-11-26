@@ -96,6 +96,13 @@ impl MarkdownDocument {
 
     /// Scrolls `line` to the top; the caret stays.
     pub fn set_top_line(&mut self, line: usize, window: &mut Window, cx: &mut Context<Self>) {
+        // A line a fold hides shows by unfolding its heading first.
+        let at = {
+            let editor = self.editor.read(cx);
+            let line = line.min(editor.buffer().lines().saturating_sub(1));
+            editor.buffer().line_range(line).start
+        };
+        self.unfold_at(at, cx);
         self.asks += 1;
         self.top = Some(Placement {
             line,

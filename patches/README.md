@@ -47,7 +47,11 @@ pin 一致；不要在任何地方再抄一份版本号。
   `bump:` 两行是本仓库加的。
 - `gpui/0016`：Green 自己的 `shape-count` 特性（`--features shape-count`），S2 用它证明
   折叠前后没有重新排版。
+- `gpui/0017`：S2a 的收尾——计数挪到真正排版的那一层（缓存命中不算），并让折叠把上一帧的
+  行留在 `keep_frame` 里，展开时不必重新排版。
 - `ely-gpui-components/fc71e96-0001-marked.patch`：`==高亮==` 在 `tree` 读取里成为 `Mark` run。
+- `ely-gpui-components/fc71e96-0002-fold-and-outline.patch`：S2a 的折叠与大纲树（`document/fold.rs`、
+  `document/visual.rs`、`lists/outline.rs` 等 15 个文件）。
 - `ely-gpui-components/fc71e96-prune.txt`：组件库自己仓库的文档、CI、api 快照等 266 个路径，
   vendor 不保留。它不是补丁，是 vendoring 政策；脚本按这份清单删，删完再应用补丁。
 - `crates-io/`：五个 crate 各一条 `0001`，都是上游行为不对的小修（对象路径回收、GFM 脚注链接、

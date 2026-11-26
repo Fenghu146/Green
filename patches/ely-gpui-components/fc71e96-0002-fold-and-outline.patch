@@ -1,0 +1,1215 @@
+baseline: ely-gpui-components fc71e964088e0de2a81abff572a5684be17ebfd4, the rev Cargo.toml pins
+bump: If the fork already folds by heading and carries an outline tree of its own, drop this. If `documents::document` was restructured again, rewrite.
+
+diff --git a/vendor/ely-gpui-components/crates/ely-core/src/lists/outline.rs b/vendor/ely-gpui-components/crates/ely-core/src/lists/outline.rs
+index a4e5a54..2427b3f 100644
+--- a/vendor/ely-gpui-components/crates/ely-core/src/lists/outline.rs
++++ b/vendor/ely-gpui-components/crates/ely-core/src/lists/outline.rs
+@@ -1,19 +1,31 @@
+-use std::rc::Rc;
++use std::{collections::HashSet, rc::Rc};
+ 
+ use gpui::{
+-    Animation, AnimationExt, App, ElementId, FontWeight, InteractiveElement, IntoElement,
+-    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
+-    prelude::*,
++    AnyElement, App, ElementId, FontWeight, IntoElement, ParentElement, Pixels, RenderOnce, Rems,
++    Role, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, uniform_list,
+ };
+ 
+ use crate::{
+-    motion::{self, Axis, Marker, glide, measure_item, measure_origin, slide},
+-    theme::{ActiveTheme, TextSize},
++    layout::seeded::use_seeded,
++    primitives::Triangle,
++    theme::{ActiveTheme, ControlSize, IconSize, Palette, Radius, TextSize},
++    typography::Ellipsis,
+ };
+ 
+ type OnKey = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
++type OnFold = Rc<dyn Fn(&SharedString, bool, &mut App)>;
+ 
+-/// A document's headings, each level stepping in, beside a rail whose marker glides to the section in view. A press asks the owner to go there; the owner says which is current.
++/// One heading of an outline.
++#[derive(Clone, Debug, PartialEq)]
++struct Item {
++    key: SharedString,
++    title: SharedString,
++    level: usize,
++}
++
++/// A document's headings as a tree: each level steps in, a heading with
++/// headings under it shows ▾ open or ▸ folded, and a leaf keeps the triangle's
++/// room so rows never jump. Large files draw only the rows in view.
+ ///
+ /// ```
+ /// use ely_core::lists::Outline;
+@@ -21,15 +33,18 @@ type OnKey = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
+ /// let headings = Outline::new("headings")
+ ///     .item("intro", "Introduction", 1)
+ ///     .item("setup", "Setup", 2)
++///     .open(["intro"])
+ ///     .current("intro")
+ ///     .on_select(|_key, _, _| {});
+ /// ```
+ #[derive(IntoElement)]
+ pub struct Outline {
+     id: ElementId,
+-    items: Vec<(SharedString, SharedString, usize)>,
++    items: Vec<Item>,
++    open: Option<Vec<SharedString>>,
+     current: Option<SharedString>,
+     on_select: Option<OnKey>,
++    on_fold: Option<OnFold>,
+ }
+ 
+ impl Outline {
+@@ -38,8 +53,10 @@ impl Outline {
+         Self {
+             id: id.into(),
+             items: Vec::new(),
++            open: None,
+             current: None,
+             on_select: None,
++            on_fold: None,
+         }
+     }
+ 
+@@ -51,7 +68,18 @@ impl Outline {
+         level: usize,
+     ) -> Self {
+         assert!(level >= 1, "heading levels start at one");
+-        self.items.push((key.into(), title.into(), level));
++        self.items.push(Item {
++            key: key.into(),
++            title: title.into(),
++            level,
++        });
++        self
++    }
++
++    /// The keys whose headings show their children; the rest are folded.
++    /// Without it every heading shows its children.
++    pub fn open(mut self, keys: impl IntoIterator<Item = impl Into<SharedString>>) -> Self {
++        self.open = Some(keys.into_iter().map(Into::into).collect());
+         self
+     }
+ 
+@@ -69,95 +97,202 @@ impl Outline {
+         self.on_select = Some(Rc::new(handler));
+         self
+     }
++
++    /// Hears each heading toggled: its key, and whether its children show.
++    pub fn on_fold(mut self, handler: impl Fn(&SharedString, bool, &mut App) + 'static) -> Self {
++        self.on_fold = Some(Rc::new(handler));
++        self
++    }
++}
++
++/// The keys with headings under them.
++fn with_children(items: &[Item]) -> HashSet<SharedString> {
++    (0..items.len())
++        .filter(|ix| items.get(ix + 1).is_some_and(|next| next.level > items[*ix].level))
++        .map(|ix| items[ix].key.clone())
++        .collect()
++}
++
++/// The items in view, depth first, through the open headings.
++fn visible(items: &[Item], open: &HashSet<SharedString>) -> Vec<usize> {
++    let mut out = Vec::with_capacity(items.len());
++    // The level whose folded heading hides the levels under it.
++    let mut folded_at: Option<usize> = None;
++    for (ix, item) in items.iter().enumerate() {
++        if folded_at.is_some_and(|level| item.level > level) {
++            continue;
++        }
++        folded_at = None;
++        out.push(ix);
++        let opens = items.get(ix + 1).is_some_and(|next| next.level > item.level);
++        if opens && !open.contains(&item.key) {
++            folded_at = Some(item.level);
++        }
++    }
++    out
++}
++
++/// The triangle's share of its old box: two thirds across.
++const MARK: f32 = 2.0 / 3.0;
++
++/// What drawing rows needs.
++struct Rows {
++    id: ElementId,
++    items: Rc<Vec<Item>>,
++    shown: Rc<Vec<usize>>,
++    opened: HashSet<SharedString>,
++    current: Option<SharedString>,
++    on_select: Option<OnKey>,
++    toggle: Rc<dyn Fn(&SharedString, bool, &mut App)>,
++    indent: Rems,
++    /// The triangle's box, the slot it sits in, and the press it keeps.
++    mark: Pixels,
++    slot: Pixels,
++    hit: Pixels,
++    height: Pixels,
++    radius: Rems,
++    palette: Palette,
+ }
+ 
+ impl RenderOnce for Outline {
+     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+-        let keys: Vec<SharedString> = self.items.iter().map(|(key, _, _)| key.clone()).collect();
+-        let sliding = self
+-            .current
+-            .as_ref()
+-            .map(|current| slide((self.id.clone(), "slide"), &keys, current, window, cx));
+-        let duration = motion::duration(motion::SLOW, cx);
++        let id = self.id;
++        let seed = match &self.open {
++            Some(open) => open.clone(),
++            None => with_children(&self.items).into_iter().collect(),
++        };
++        let opened = use_seeded((id.clone(), "open"), seed, window, cx);
+         let theme = cx.theme();
+-        let colors = &theme.colors;
+-        let marker = sliding
+-            .as_ref()
+-            .and_then(|(_, marker)| marker.as_ref())
+-            .map(
+-                |Marker {
+-                     from,
+-                     to,
+-                     generation,
+-                 }| {
+-                    let (from, to) = (*from, *to);
+-                    div()
+-                        .absolute()
+-                        .left_0()
+-                        .border_l_2()
+-                        .border_color(colors.accent)
+-                        .with_animation(
+-                            (self.id.clone(), format!("marker-{generation}")),
+-                            Animation::new(duration),
+-                            move |bar, t| {
+-                                let (top, height) = glide(from, to, t);
+-                                bar.top(top).h(height)
+-                            },
+-                        )
+-                },
+-            );
+-        let on_select = self.on_select;
+-        let rows = self
+-            .items
+-            .into_iter()
+-            .enumerate()
+-            .map(|(ix, (key, title, level))| {
+-                let here = self.current.as_ref() == Some(&key);
+-                let (select, id) = (on_select.clone(), self.id.clone());
+-                div()
+-                    .id((self.id.clone(), format!("item-{key}")))
+-                    .relative()
+-                    .py_1()
+-                    .pl_3()
+-                    .cursor_pointer()
+-                    .text_color(if here { colors.fg } else { colors.fg_muted })
+-                    .when(here, |row| row.font_weight(FontWeight::MEDIUM))
+-                    .hover(|style| style.text_color(colors.fg))
+-                    .on_click(move |_, window, cx| {
+-                        log::info!("outline {id:?}: {key}");
+-                        if let Some(select) = &select {
+-                            select(&key, window, cx);
+-                        }
+-                    })
+-                    .child(
+-                        div()
+-                            .ml(theme.tree_indent() * (level - 1) as f32)
+-                            .child(title),
+-                    )
+-                    .children(
+-                        sliding
+-                            .as_ref()
+-                            .map(|(state, _)| measure_item(state.clone(), ix, Axis::Vertical)),
+-                    )
+-            });
++        let shown: HashSet<SharedString> = opened.read(cx).value.iter().cloned().collect();
++        let items = Rc::new(self.items);
++        let shown_rows = Rc::new(visible(&items, &shown));
++        let fold = self.on_fold;
++        let toggle: Rc<dyn Fn(&SharedString, bool, &mut App)> = Rc::new({
++            let opened = opened.clone();
++            move |key: &SharedString, open: bool, cx: &mut App| {
++                log::info!("outline: {} {key}", if open { "opened" } else { "folded" });
++                opened.update(cx, |seeded, cx| {
++                    seeded.value.retain(|known| known != key);
++                    if open {
++                        seeded.value.push(key.clone());
++                    }
++                    cx.notify();
++                });
++                if let Some(fold) = &fold {
++                    fold(key, open, cx);
++                }
++            }
++        });
++        let rows = Rows {
++            id: id.clone(),
++            items,
++            shown: shown_rows.clone(),
++            opened: shown,
++            current: self.current,
++            on_select: self.on_select,
++            toggle: toggle.clone(),
++            indent: theme.tree_indent(),
++            mark: theme.icon_size(IconSize::Xs).to_pixels(window.rem_size()) * MARK,
++            slot: theme.tree_indent().to_pixels(window.rem_size()) * MARK,
++            hit: theme.icon_size(IconSize::Xs).to_pixels(window.rem_size()),
++            height: theme.control_height(ControlSize::Sm).to_pixels(window.rem_size()),
++            radius: theme.radius(Radius::Sm),
++            palette: theme.colors.clone(),
++        };
++        let rows = Rc::new(rows);
++        let count = shown_rows.len();
++        let list = uniform_list((id.clone(), "rows"), count, {
++            let rows = rows.clone();
++            move |range, _window, _cx| {
++                let rows = rows.as_ref();
++                range.map(|at| row(rows, at)).collect()
++            }
++        })
++        .size_full();
+         div()
++            .id(id)
+             .relative()
++            .size_full()
+             .text_size(theme.text_size(TextSize::Sm))
+-            .children(
+-                sliding
+-                    .as_ref()
+-                    .map(|(state, _)| measure_origin(state.clone(), Axis::Vertical)),
+-            )
+-            .child(
+-                div()
+-                    .absolute()
+-                    .left_0()
+-                    .top_0()
+-                    .bottom_0()
+-                    .border_l_1()
+-                    .border_color(colors.border),
+-            )
+-            .children(marker)
+-            .children(rows)
++            .child(list)
+     }
+ }
++
++/// One row: its triangle, its room per level, and its heading.
++fn row(rows: &Rows, at: usize) -> AnyElement {
++    let item = &rows.items[rows.shown[at]];
++    let opens = rows
++        .items
++        .get(rows.shown[at] + 1)
++        .is_some_and(|next| next.level > item.level);
++    let open = opens && rows.opened.contains(&item.key);
++    let here = rows.current.as_ref() == Some(&item.key);
++    let colors = &rows.palette;
++    let depth = item.level.saturating_sub(1);
++    let slot = div()
++        .id((rows.id.clone(), format!("chevron-{at}")))
++        .debug_selector(|| format!("outline-chevron-{at}"))
++        .flex_none()
++        .relative()
++        .w(rows.slot)
++        .h(rows.height)
++        .ml(rows.indent * depth as f32)
++        .flex()
++        .justify_center()
++        .when(opens, |slot| {
++            let key = item.key.clone();
++            let (toggle, open) = (rows.toggle.clone(), open);
++            // The mark is two thirds of its old box; its press keeps the old
++            // triangle's width and the whole row's height.
++            let press = div()
++                .id((rows.id.clone(), format!("fold-{at}")))
++                .absolute()
++                .left((rows.slot - rows.hit) * 0.5)
++                .top_0()
++                .w(rows.hit)
++                .h(rows.height)
++                .cursor_pointer()
++                .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
++                    cx.stop_propagation();
++                    toggle(&key, !open, cx);
++                });
++            slot.child(Triangle::new(open).size(rows.mark))
++                .child(press)
++        });
++    let select = rows.on_select.clone();
++    let key = item.key.clone();
++    div()
++        .id((rows.id.clone(), format!("row-{at}")))
++        .debug_selector(|| format!("outline-row-{at}"))
++        .role(Role::TreeItem)
++        .aria_label(item.title.clone())
++        .aria_level(item.level)
++        .when(opens, |row| row.aria_expanded(open))
++        .aria_selected(here)
++        .relative()
++        .w_full()
++        .h(rows.height)
++        .flex()
++        .items_center()
++        .gap_1()
++        .px_2()
++        .rounded(rows.radius)
++        .text_color(if here { colors.fg } else { colors.fg_muted })
++        .when(here, |row| {
++            row.bg(colors.active).font_weight(FontWeight::MEDIUM)
++        })
++        .when(!here, |row| row.hover(|style| style.bg(colors.hover)))
++        .child(slot)
++        .child(
++            div()
++                .flex_1()
++                .min_w_0()
++                .child(Ellipsis::new(item.title.clone())),
++        )
++        .on_click(move |_, window, cx| {
++            if let Some(select) = &select {
++                select(&key, window, cx);
++            }
++        })
++        .into_any_element()
++}
+diff --git a/vendor/ely-gpui-components/crates/ely-core/src/primitives/mod.rs b/vendor/ely-gpui-components/crates/ely-core/src/primitives/mod.rs
+index 509a9e6..cb76504 100644
+--- a/vendor/ely-gpui-components/crates/ely-core/src/primitives/mod.rs
++++ b/vendor/ely-gpui-components/crates/ely-core/src/primitives/mod.rs
+@@ -15,6 +15,7 @@ mod pressable;
+ mod retired;
+ mod severity;
+ mod tooltip;
++mod triangle;
+ 
+ #[cfg(all(test, feature = "test-support"))]
+ mod tests;
+@@ -43,3 +44,4 @@ pub use pressable::Pressable;
+ pub use retired::Retired;
+ pub use severity::Severity;
+ pub use tooltip::{HelpTooltip, Tooltip, TooltipTrigger};
++pub use triangle::Triangle;
+diff --git a/vendor/ely-gpui-components/crates/ely-core/src/primitives/triangle.rs b/vendor/ely-gpui-components/crates/ely-core/src/primitives/triangle.rs
+new file mode 100644
+index 0000000..d8972af
+--- /dev/null
++++ b/vendor/ely-gpui-components/crates/ely-core/src/primitives/triangle.rs
+@@ -0,0 +1,64 @@
++use gpui::{App, Hsla, IntoElement, Pixels, RenderOnce, Window, prelude::*, svg};
++
++use crate::theme::{ActiveTheme, IconSize};
++
++/// A filled triangle pointing right while shut and down while open, drawn from
++/// bytes so it needs no font. Unlike `Disclosure`'s chevron it is a solid
++/// triangle, the outline's own mark.
++///
++/// ```
++/// use ely_core::primitives::Triangle;
++/// use gpui::px;
++///
++/// let mark = Triangle::new(true).size(px(8.0));
++/// ```
++#[derive(IntoElement)]
++pub struct Triangle {
++    open: bool,
++    size: Option<Pixels>,
++    color: Option<Hsla>,
++}
++
++impl Triangle {
++    /// A triangle pointing down when `open`, right otherwise.
++    pub fn new(open: bool) -> Self {
++        Self {
++            open,
++            size: None,
++            color: None,
++        }
++    }
++
++    /// Its size; the theme's smallest icon unless set.
++    pub fn size(mut self, size: Pixels) -> Self {
++        self.size = Some(size);
++        self
++    }
++
++    /// Its color; the subtle foreground unless set.
++    pub fn color(mut self, color: Hsla) -> Self {
++        self.color = Some(color);
++        self
++    }
++}
++
++/// Pointing right: folded.
++const RIGHT: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M1.6 0.6 L6.6 4 L1.6 7.4 Z" fill="currentColor"/></svg>"#;
++
++/// Pointing down: open.
++const DOWN: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M0.6 1.6 L7.4 1.6 L4 6.6 Z" fill="currentColor"/></svg>"#;
++
++impl RenderOnce for Triangle {
++    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
++        let theme = cx.theme();
++        let color = self.color.unwrap_or(theme.colors.fg_subtle);
++        let size = self
++            .size
++            .unwrap_or_else(|| theme.icon_size(IconSize::Xs).to_pixels(window.rem_size()));
++        svg()
++            .data(if self.open { DOWN } else { RIGHT })
++            .size(size)
++            .flex_none()
++            .text_color(color)
++    }
++}
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/edit.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/edit.rs
+index 7b7162c..daa80d3 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/edit.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/edit.rs
+@@ -82,6 +82,10 @@ impl MarkdownDocument {
+         cx: &mut Context<Self>,
+     ) {
+         self.waiting = None;
++        // A block a fold hides opens by unfolding its heading first.
++        if let Some(ix) = ix {
++            self.unfold_block(ix, cx);
++        }
+         let pressed = match ix.map(|ix| self.parsed.blocks.get(ix)) {
+             Some(None) => return log::warn!("markdown document: a press on a block read away"),
+             pressed => pressed.flatten().map(|block| block.range.start),
+@@ -365,6 +369,8 @@ impl MarkdownDocument {
+             true => Some(self.covered(open).1 + 1).filter(|next| *next < self.parsed.blocks.len()),
+             false => here.checked_sub(1),
+         };
++        // A folded heading's blocks are stepped over.
++        let next = self.shown_from(next, down);
+         let Some(next) = next else {
+             return false;
+         };
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/fold.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/fold.rs
+new file mode 100644
+index 0000000..3c5f34b
+--- /dev/null
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/fold.rs
+@@ -0,0 +1,367 @@
++//! Folding a heading's blocks, and the keys a file remembers (design §5).
++
++use std::collections::{HashMap, HashSet};
++
++use gpui::{App, Context, Window};
++
++use super::{DocumentEvent, MarkdownDocument, TargetBlock, parse::Block};
++use crate::tree::DocumentHeading;
++
++/// A top-level heading that can fold.
++#[derive(Clone, Debug, PartialEq)]
++pub(crate) struct Head {
++    /// Its key across edits: its text and its ordinal among headings its level.
++    pub key: String,
++    pub level: u8,
++    /// One past the last block it folds.
++    pub end: usize,
++    /// Whether any block sits under it.
++    pub opens: bool,
++}
++
++/// What is hidden, and which heading hides it.
++#[derive(Clone, Debug, Default)]
++pub(crate) struct Folds {
++    heads: HashMap<usize, Head>,
++    /// Per block, the outermost folded heading hiding it.
++    hidden: Vec<Option<usize>>,
++}
++
++impl Folds {
++    /// The folds `folded` names among `blocks`; headings give the keys.
++    pub(crate) fn new(
++        blocks: &[Block],
++        headings: &[DocumentHeading],
++        keys: &[String],
++        folded: &HashSet<String>,
++    ) -> Folds {
++        let keys_at: HashMap<usize, &String> = headings
++            .iter()
++            .zip(keys)
++            .map(|(heading, key)| (heading.at, key))
++            .collect();
++        let mut heads = HashMap::new();
++        for (ix, block) in blocks.iter().enumerate() {
++            let TargetBlock::Heading(level) = block.kind else {
++                continue;
++            };
++            let Some(key) = keys_at.get(&block.range.start) else {
++                // A heading inside a quote or list folds with its outer block only.
++                continue;
++            };
++            let end = (ix + 1..blocks.len())
++                .find(|at| matches!(blocks[*at].kind, TargetBlock::Heading(other) if other <= level))
++                .unwrap_or(blocks.len());
++            heads.insert(
++                ix,
++                Head {
++                    key: (*key).clone(),
++                    level,
++                    end,
++                    opens: end > ix + 1,
++                },
++            );
++        }
++        let mut hidden = vec![None; blocks.len()];
++        for (ix, head) in &heads {
++            if !folded.contains(&head.key) || !head.opens {
++                continue;
++            }
++            for inside in ix + 1..head.end {
++                hidden[inside].get_or_insert(*ix);
++            }
++        }
++        Folds { heads, hidden }
++    }
++
++    /// The heading block `block` is, when it is one.
++    pub(crate) fn head(&self, block: usize) -> Option<&Head> {
++        self.heads.get(&block)
++    }
++
++    /// The outermost folded heading hiding `block`.
++    pub(crate) fn hides(&self, block: usize) -> Option<usize> {
++        self.hidden.get(block).copied().flatten()
++    }
++
++    /// Whether a folded heading hides `block`.
++    pub(crate) fn hidden(&self, block: usize) -> bool {
++        self.hides(block).is_some()
++    }
++}
++
++/// A heading's key: its level, its ordinal among headings of that level, and
++/// its text. Two headings with one text still differ by their ordinal.
++pub(crate) fn key(level: u8, ordinal: usize, text: &str) -> String {
++    format!("{level}|{ordinal}|{text}")
++}
++
++/// Keys and parents for `headings`, in document order.
++pub(crate) fn keys(headings: &[DocumentHeading]) -> (Vec<String>, Vec<Option<usize>>) {
++    let mut counts = [0usize; 7];
++    let mut keys = Vec::with_capacity(headings.len());
++    let mut parents = Vec::with_capacity(headings.len());
++    let mut open: Vec<(u8, usize)> = Vec::new();
++    for (ix, heading) in headings.iter().enumerate() {
++        let level = heading.depth.clamp(1, 6);
++        let ordinal = counts[usize::from(level)];
++        counts[usize::from(level)] += 1;
++        keys.push(key(level, ordinal, &heading.title));
++        while open.last().is_some_and(|(depth, _)| *depth >= level) {
++            open.pop();
++        }
++        parents.push(open.last().map(|(_, at)| *at));
++        open.push((level, ix));
++    }
++    (keys, parents)
++}
++
++/// A heading as the outline tree shows it: no source marks, and its place in
++/// the tree.
++#[derive(Clone, Debug, PartialEq)]
++pub struct OutlineHeading {
++    /// Its level, 1 to 6.
++    pub depth: u8,
++    /// Its text, without `#`, `**`, backticks or `$`.
++    pub title: String,
++    /// Its line, from zero.
++    pub line: usize,
++    /// Where its source starts, in bytes.
++    pub at: usize,
++    /// Its key in the file's view state.
++    pub key: String,
++    /// The heading it sits under, by index.
++    pub parent: Option<usize>,
++    /// Whether headings sit under it.
++    pub opens: bool,
++}
++
++/// `title` as the outline shows it: the marks leave, the words stay.
++pub(crate) fn plain_title(title: &str) -> String {
++    let title = title.trim_start_matches(['#', ' ', '\t']);
++    let mut out = String::with_capacity(title.len());
++    let mut rest = title.chars().peekable();
++    while let Some(ch) = rest.next() {
++        match ch {
++            // A formula keeps its text and loses its dollars.
++            '$' => {}
++            '`' => {}
++            '*' if rest.peek() == Some(&'*') => {
++                rest.next();
++            }
++            _ => out.push(ch),
++        }
++    }
++    out.trim().to_string()
++}
++
++impl MarkdownDocument {
++    /// Recomputes what the folded keys hide after a read or a toggle.
++    pub(super) fn refold(&mut self) {
++        self.folds = Folds::new(
++            &self.parsed.blocks,
++            &self.parsed.headings,
++            &self.parsed.keys,
++            &self.folded,
++        );
++    }
++
++    /// The folded keys, sorted, as a file's view state keeps them.
++    pub fn folded_keys(&self) -> Vec<String> {
++        let mut keys: Vec<String> = self.folded.iter().cloned().collect();
++        keys.sort();
++        keys
++    }
++
++    /// Folds exactly `keys`; the list lays out again around them.
++    pub fn set_folded(
++        &mut self,
++        keys: impl IntoIterator<Item = String>,
++        cx: &mut Context<Self>,
++    ) {
++        let folded: HashSet<String> = keys.into_iter().collect();
++        if folded == self.folded {
++            return;
++        }
++        self.folded = folded;
++        self.refold();
++        let count = self.list.item_count();
++        self.list.remeasure_items(0..count);
++        cx.emit(DocumentEvent::Folded);
++        cx.notify();
++    }
++
++    /// Whether a folded heading hides block `block`.
++    pub fn hidden(&self, block: usize) -> bool {
++        self.folds.hidden(block)
++    }
++
++    /// The heading block `block` is, with whether it has blocks under it.
++    pub(crate) fn fold_head(&self, block: usize) -> Option<(String, u8, bool, bool)> {
++        let head = self.folds.head(block)?;
++        Some((
++            head.key.clone(),
++            head.level,
++            head.opens,
++            self.folded.contains(&head.key),
++        ))
++    }
++
++    /// Folds or unfolds the heading at `block`; the answer is whether it now
++    /// folds, and None when the block folds nothing.
++    pub fn toggle_fold(
++        &mut self,
++        block: usize,
++        window: &mut Window,
++        cx: &mut Context<Self>,
++    ) -> Option<bool> {
++        let head = self.folds.head(block)?.clone();
++        if !head.opens {
++            return None;
++        }
++        let folding = !self.folded.contains(&head.key);
++        if folding {
++            // A block being hidden writes back first, so no field hides.
++            let inside = self
++                .open
++                .as_ref()
++                .is_some_and(|open| (block + 1..head.end).contains(&self.block_at(open.range.start)));
++            if inside && self.commit(cx).is_some() {
++                self.reparse(true, cx);
++            }
++            // What is on screen now is about to hide: keep its layout, so
++            // unfolding reuses it instead of shaping it again.
++            window.text_system().keep_frame();
++            self.folded.insert(head.key.clone());
++        } else {
++            self.folded.remove(&head.key);
++        }
++        let head = self.folds.head(block).cloned().unwrap_or(head);
++        self.refold();
++        self.list.remeasure_items(block + 1..head.end);
++        log::info!(
++            "markdown document: {} the heading at block {block} (level {})",
++            if folding { "folds" } else { "unfolds" },
++            head.level
++        );
++        cx.emit(DocumentEvent::Folded);
++        cx.notify();
++        Some(folding)
++    }
++
++    /// Folds or unfolds the heading whose source starts at `at`.
++    pub fn toggle_fold_at(
++        &mut self,
++        at: usize,
++        window: &mut Window,
++        cx: &mut Context<Self>,
++    ) -> Option<bool> {
++        let block = self.block_at(at);
++        self.toggle_fold(block, window, cx)
++    }
++
++    /// Unfolds every heading hiding `block`; true when one did.
++    pub fn unfold_block(&mut self, block: usize, cx: &mut Context<Self>) -> bool {
++        let (mut from, mut to, mut changed) = (usize::MAX, 0, false);
++        while let Some(head) = self.folds.hides(block) {
++            let Some(found) = self.folds.head(head).cloned() else {
++                break;
++            };
++            self.folded.remove(&found.key);
++            from = from.min(head + 1);
++            to = to.max(found.end);
++            changed = true;
++            self.refold();
++        }
++        if changed {
++            self.list.remeasure_items(from..to);
++            cx.emit(DocumentEvent::Folded);
++            cx.notify();
++        }
++        changed
++    }
++
++    /// Unfolds every heading hiding the block at byte `at`; true when one did.
++    pub fn unfold_at(&mut self, at: usize, cx: &mut Context<Self>) -> bool {
++        let block = self.block_at(at);
++        self.unfold_block(block, cx)
++    }
++
++    /// The first block a fold does not hide, from `next` and walking `down`.
++    pub(super) fn shown_from(&self, next: Option<usize>, down: bool) -> Option<usize> {
++        let len = self.parsed.blocks.len();
++        let mut at = next;
++        while let Some(ix) = at {
++            if !self.folds.hidden(ix) {
++                return Some(ix);
++            }
++            at = match down {
++                true => Some(ix + 1).filter(|ix| *ix < len),
++                false => ix.checked_sub(1),
++            };
++        }
++        None
++    }
++
++    /// The headings as a tree, with their keys and parents, for the outline.
++    pub fn outline_tree(&self, cx: &App) -> Vec<OutlineHeading> {
++        let editor = self.editor.read(cx);
++        let len = editor.text().len();
++        self.parsed
++            .headings
++            .iter()
++            .enumerate()
++            .filter(|(_, heading)| heading.at <= len)
++            .map(|(ix, heading)| OutlineHeading {
++                depth: heading.depth,
++                title: plain_title(&heading.title),
++                line: editor.buffer().line_of(heading.at),
++                at: heading.at,
++                key: self.parsed.keys[ix].clone(),
++                parent: self.parsed.parents[ix],
++                opens: self
++                    .parsed
++                    .headings
++                    .get(ix + 1)
++                    .is_some_and(|next| next.depth > heading.depth),
++            })
++            .collect()
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn heading(depth: u8, title: &str, at: usize) -> DocumentHeading {
++        DocumentHeading {
++            depth,
++            title: title.to_string(),
++            at,
++        }
++    }
++
++    #[test]
++    fn keys_count_headings_of_the_same_level() {
++        let found = [
++            heading(1, "Lift", 0),
++            heading(2, "Lift", 4),
++            heading(1, "Lift", 9),
++            heading(3, "Light", 14),
++        ];
++        let (keys, parents) = keys(&found);
++        assert_eq!(
++            keys,
++            ["1|0|Lift", "2|0|Lift", "1|1|Lift", "3|0|Light"]
++        );
++        assert_eq!(parents, [None, Some(0), None, Some(2)]);
++    }
++
++    #[test]
++    fn titles_lose_their_marks_and_keep_their_words() {
++        assert_eq!(plain_title("# Lift **it**"), "Lift it");
++        assert_eq!(plain_title("通项 $a_n$ 是等比"), "通项 a_n 是等比");
++        assert_eq!(plain_title("`code` and more"), "code and more");
++        assert_eq!(plain_title("a *star*"), "a *star*");
++    }
++}
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/format.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/format.rs
+index 2db3e35..886e7d7 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/format.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/format.rs
+@@ -350,6 +350,12 @@ fn toggle_in(
+     if s != e {
+         return wrap(text, nodes, &within, s, e, format);
+     }
++    // A link with nothing selected takes no word: its empty address is what
++    // the caret types into.
++    if matches!(format, InlineFormat::Link | InlineFormat::Image) {
++        crossed(text, nodes, &within, s, s, format)?;
++        return Ok(pair(s, format));
++    }
+     let prev = text[within.start..s].chars().next_back();
+     let next = text[s..within.end].chars().next();
+     if prev.is_none_or(stop) && next.is_none_or(stop) {
+@@ -401,10 +407,15 @@ fn written(format: InlineFormat, inner: &str) -> (String, String) {
+     (open.into(), close.into())
+ }
+ 
+-/// An empty pair at `at`, the caret inside it.
++/// An empty pair at `at`, the caret inside it; a link's caret goes inside the
++/// address, ready for the URL.
+ fn pair(at: usize, format: InlineFormat) -> Change {
+     let (open, close) = written(format, "");
+-    let caret = at + open.len();
++    let caret = match format {
++        // `[]()`: the caret sits between the parentheses.
++        InlineFormat::Link | InlineFormat::Image => at + open.len() + 2,
++        _ => at + open.len(),
++    };
+     (vec![(at..at, format!("{open}{close}"))], caret..caret)
+ }
+ 
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/look.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/look.rs
+index c365ce4..a3a8298 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/look.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/look.rs
+@@ -2,7 +2,7 @@
+ 
+ use gpui::{Context, Rems, SharedString};
+ 
+-use super::MarkdownDocument;
++use super::{MarkdownDocument, TargetBlock};
+ use crate::MarkdownMode;
+ use crate::editor::LineNumbers;
+ 
+@@ -69,6 +69,14 @@ impl MarkdownDocument {
+         }
+     }
+ 
++    /// The kind of the block at the caret, or the one open.
++    pub fn block_kind(&self, cx: &gpui::App) -> Option<TargetBlock> {
++        self.parsed
++            .blocks
++            .get(self.current_block(cx))
++            .map(|block| block.kind)
++    }
++
+     /// Half a view of room at each end, for typewriter.
+     pub(super) fn make_room(&mut self) {
+         let room = match self.look.typewriter && self.mode == MarkdownMode::Visual {
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/mod.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/mod.rs
+index 73b0876..58a4d17 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/mod.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/mod.rs
+@@ -4,6 +4,7 @@ mod block;
+ mod cells;
+ mod edit;
+ mod finding;
++mod fold;
+ mod format;
+ mod lists;
+ mod look;
+@@ -19,7 +20,7 @@ mod visual;
+ 
+ pub(crate) use visual::bind_keys;
+ 
+-use std::{ops::Range, path::Path, rc::Rc, sync::Arc, time::Duration};
++use std::{collections::HashSet, ops::Range, path::Path, rc::Rc, sync::Arc, time::Duration};
+ 
+ use gpui::{
+     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, ListAlignment,
+@@ -29,8 +30,10 @@ use gpui::{
+ pub use crate::tree::DocumentHeading;
+ pub use attach::Attachment;
+ pub use block::BlockCommand;
++pub use fold::OutlineHeading;
+ pub use format::{EditRefusal, InlineFormat};
+ pub use look::DocumentLook;
++use fold::Folds;
+ use parse::{Parsed, alike, parsed};
+ pub use point::{DocumentTarget, TargetBlock};
+ pub use tables::{TableEdit, TableRefusal};
+@@ -62,6 +65,8 @@ pub enum DocumentEvent {
+     Changed,
+     /// A new read of the text: blocks and headings.
+     Parsed,
++    /// Headings folded or unfolded.
++    Folded,
+     /// A secondary press moved the caret onto this.
+     Pointed(DocumentTarget),
+     /// A long format, accepted, did not happen.
+@@ -105,6 +110,10 @@ pub struct MarkdownDocument {
+     mode: MarkdownMode,
+     base: Option<Arc<Path>>,
+     parsed: Arc<Parsed>,
++    /// Folded headings, by key; a file's view state keeps these.
++    folded: HashSet<String>,
++    /// What those folds hide, and where each heading ends.
++    folds: Folds,
+     /// Text changes counted; a read of an older one lapses.
+     edits: u64,
+     _parsing: Option<Task<()>>,
+@@ -199,6 +208,8 @@ impl MarkdownDocument {
+             mode,
+             base: None,
+             parsed: Arc::default(),
++            folded: HashSet::new(),
++            folds: Folds::default(),
+             edits: 0,
+             _parsing: None,
+             editing: false,
+@@ -400,6 +411,7 @@ impl MarkdownDocument {
+         self.editor
+             .update(cx, |editor, _| editor.set_anchors(headings));
+         self.parsed = Arc::new(read);
++        self.refold();
+         cx.emit(DocumentEvent::Parsed);
+         cx.notify();
+     }
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/parse.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/parse.rs
+index 07974e8..1bf7e00 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/parse.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/parse.rs
+@@ -7,7 +7,7 @@ use crate::{
+     tree::{DocumentHeading, Node, Reader},
+ };
+ 
+-use super::TargetBlock;
++use super::{TargetBlock, fold};
+ 
+ /// A top-level block: its source, and what it draws.
+ #[derive(Clone, Debug, PartialEq)]
+@@ -25,6 +25,10 @@ pub(crate) struct Parsed {
+     pub text: String,
+     pub blocks: Vec<Block>,
+     pub headings: Vec<DocumentHeading>,
++    /// Each heading's key, as a file's view state keeps it.
++    pub keys: Vec<String>,
++    /// Each heading's parent, by index in `headings`.
++    pub parents: Vec<Option<usize>>,
+ }
+ 
+ /// `text` read whole; every byte is in or between blocks.
+@@ -52,10 +56,13 @@ pub(crate) fn parsed(text: &str) -> Parsed {
+             }
+         })
+         .collect();
++    let (keys, parents) = fold::keys(&reader.headings);
+     Parsed {
+         text: text.to_string(),
+         blocks,
+         headings: reader.headings,
++        keys,
++        parents,
+     }
+ }
+ 
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/place.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/place.rs
+index 1da428b..e4fc028 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/place.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/place.rs
+@@ -96,6 +96,13 @@ impl MarkdownDocument {
+ 
+     /// Scrolls `line` to the top; the caret stays.
+     pub fn set_top_line(&mut self, line: usize, window: &mut Window, cx: &mut Context<Self>) {
++        // A line a fold hides shows by unfolding its heading first.
++        let at = {
++            let editor = self.editor.read(cx);
++            let line = line.min(editor.buffer().lines().saturating_sub(1));
++            editor.buffer().line_range(line).start
++        };
++        self.unfold_at(at, cx);
+         self.asks += 1;
+         self.top = Some(Placement {
+             line,
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/tests/format.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/tests/format.rs
+index c498547..0c16a30 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/tests/format.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/tests/format.rs
+@@ -71,7 +71,13 @@ fn a_caret_takes_its_word_or_an_empty_pair() {
+     assert_eq!(ok("a wo‸rd z", Strong), "a **⟨word⟩** z");
+     assert_eq!(ok("a ‸ z", Strong), "a **‸** z");
+     assert_eq!(ok("a\n\n‸", Emphasis), "a\n\n*‸*", "a blank line");
+-    assert_eq!(ok("a ‸ z", Link), "a [‸]() z");
++    assert_eq!(ok("a ‸ z", Link), "a [](‸) z", "the caret takes the URL");
++    assert_eq!(ok("a ‸ z", Image), "a ![](‸) z");
++    assert_eq!(
++        ok("a wo‸rd z", Link),
++        "a wo[](‸)rd z",
++        "a link takes no word"
++    );
+     assert_eq!(
+         ok("x　wo‸rd", Strong),
+         "x　**⟨word⟩**",
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/visual.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/visual.rs
+index 711fe49..0418784 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/visual.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/visual.rs
+@@ -10,8 +10,8 @@ use crate::{
+     forms::{self, Down, SelectDown, SelectUp, Up},
+     i18n,
+     layout::{ScrollSource, Scrollbar},
+-    primitives::FocusRing as _,
+-    theme::{ActiveTheme, Radius, TextSize, Theme},
++    primitives::{FocusRing as _, Triangle},
++    theme::{ActiveTheme, IconSize, Radius, TextSize, Theme},
+     {
+         MarkdownMode, TargetBlock,
+         render::{
+@@ -122,16 +122,17 @@ impl MarkdownDocument {
+     }
+ 
+     /// A block, or the end.
+-    fn block_item(&mut self, ix: usize, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
++    fn block_item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+         let editing = self.mode == MarkdownMode::Visual;
+         let drawn = editing && ix < self.parsed.blocks.len();
+         let on_point = drawn.then(|| self.on_point(ix, cx));
+         let theme = cx.theme();
+         let colors = theme.colors.clone();
+-        let (radius, body, mono) = (
++        let (radius, body, mono, mark) = (
+             theme.radius(Radius::Md),
+             theme.text_size(TextSize::Base) * self.look.scale,
+             theme.mono_family.clone(),
++            theme.icon_size(IconSize::Sm).to_pixels(window.rem_size()),
+         );
+         // Focus fades all but the reader's block.
+         let faded = self.look.focus && editing_mode(self.mode) && ix != self.current_block(cx);
+@@ -145,6 +146,10 @@ impl MarkdownDocument {
+                 (_, false) => div().into_any_element(),
+             };
+         };
++        // A folded heading's blocks draw nothing and take no room.
++        if self.folds.hidden(ix) {
++            return div().into_any_element();
++        }
+         if let Some(open) = open.filter(|open| open.cell.is_none() && !open.append) {
+             let range = &open.range;
+             if range.start == block.range.start {
+@@ -230,6 +235,40 @@ impl MarkdownDocument {
+                 ))
+             }
+         };
++        // A heading with blocks under it shows its fold at its line's end.
++        let shown = match self.fold_head(ix) {
++            Some((_, _, true, folded)) => {
++                let toggle = div()
++                    .id(("fold", ix))
++                    .debug_selector(move || format!("markdown-fold-{ix}"))
++                    .role(Role::Button)
++                    .flex_none()
++                    .pt_1()
++                    .px_1()
++                    .cursor_pointer()
++                    .hover(|style| style.bg(colors.hover))
++                    .on_mouse_down(
++                        MouseButton::Left,
++                        cx.listener(move |document, _: &MouseDownEvent, window, cx| {
++                            window.prevent_default();
++                            cx.stop_propagation();
++                            document.toggle_fold(ix, window, cx);
++                        }),
++                    )
++                    .child(
++                        Triangle::new(!folded)
++                            .size(mark)
++                            .color(colors.fg_subtle),
++                    );
++                div()
++                    .flex()
++                    .items_start()
++                    .gap_1()
++                    .child(div().flex_1().min_w_0().child(shown))
++                    .child(toggle)
++            }
++            _ => shown,
++        };
+         // A match no drawn text shows washes its whole block.
+         let missed = found.missed();
+         let block = div()
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs b/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs
+index ed9dc03..89d5dc7 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/lib.rs
+@@ -48,8 +48,8 @@ pub use diagram::{Diagram, diagram_svg};
+ pub(crate) use diagram::{flatten, options as svg_options};
+ pub use document::{
+     Attachment, BlockCommand, DocumentEvent, DocumentHeading, DocumentLook, DocumentTarget,
+-    EditRefusal, InlineFormat, LARGEST_READ, MarkdownDocument, TableEdit, TableRefusal,
+-    TargetBlock,
++    EditRefusal, InlineFormat, LARGEST_READ, MarkdownDocument, OutlineHeading, TableEdit,
++    TableRefusal, TargetBlock,
+ };
+ pub use epub::{Chapter, EpubReader};
+ pub use format::{Format, format};
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/render.rs b/vendor/ely-gpui-components/crates/ely-documents/src/render.rs
+index e2110ac..aa04e7a 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/render.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/render.rs
+@@ -165,14 +165,16 @@ pub(crate) struct Hooks<'a> {
+ /// Headings and strong text share one weight.
+ pub(crate) const HEAVY: FontWeight = FontWeight::BOLD;
+ 
+-/// Typora's heading steps over the body.
++/// Typora's heading steps over the body (design §8); the last three read by
++/// weight and spacing more than size.
+ pub(crate) fn heading_step(level: u8) -> f32 {
+     match level {
+-        1 => 2.25,
+-        2 => 1.75,
+-        3 => 1.5,
+-        4 => 1.25,
+-        _ => 1.0,
++        1 => 1.6,
++        2 => 1.35,
++        3 => 1.15,
++        4 => 1.05,
++        5 => 1.0,
++        _ => 0.95,
+     }
+ }
+ 
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/render/tests.rs b/vendor/ely-gpui-components/crates/ely-documents/src/render/tests.rs
+index 1167474..a356da0 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/render/tests.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/render/tests.rs
+@@ -90,7 +90,7 @@ fn headings_step_up_from_the_body_by_typoras_ratios(cx: &mut TestAppContext) {
+                 rems(0.5).to_pixels(rem),
+             )
+         });
+-        for (ordinal, step) in [2.25, 1.75, 1.5, 1.25, 1.0, 1.0].into_iter().enumerate() {
++        for (ordinal, step) in [1.6, 1.35, 1.15, 1.05, 1.0, 0.95].into_iter().enumerate() {
+             let selector = Box::leak(format!("markdown-heading-{ordinal}").into_boxed_str());
+             let high = cx.debug_bounds(selector).expect("drawn").size.height;
+             let off = high - pad - base * step * 1.3;
