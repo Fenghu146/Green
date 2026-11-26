@@ -50,7 +50,7 @@ const SYMBOLS: &[(&str, &str)] = &[
     ("leftarrow", "arrow.l"),
     ("Rightarrow", "arrow.r.double"),
     ("sum", "sum"),
-    ("prod", "prod"),
+    ("prod", "product"),
     ("int", "integral"),
     ("infty", "infinity"),
     ("dots", "dots.h"),
@@ -81,6 +81,29 @@ const SYMBOLS: &[(&str, &str)] = &[
 
 /// Characters that follow a backslash as themselves.
 const ESCAPED: &[char] = &['{', '}', '%', '_', '&', '#', '$'];
+
+/// Symbols that sit between two operands: a space goes on both sides, so no
+/// neighbouring token can fuse with them.
+const OPERATORS: &[&str] = &[
+    "times",
+    "dot.op",
+    "plus.minus",
+    "minus.plus",
+    "div",
+    "mod",
+    "tilde.op",
+    "approx",
+    "equiv",
+    "lt.eq",
+    "gt.eq",
+    "eq.not",
+    "arrow.r",
+    "arrow.l",
+    "arrow.r.double",
+    // Written by the comparison glyphs, not read from a command.
+    "lt",
+    "gt",
+];
 
 /// The whitelist, for the message an unsupported command gets.
 pub fn whitelisted(name: &str) -> bool {
@@ -172,7 +195,7 @@ impl<'a> Reader<'a> {
             if self.peek() == Some('}') {
                 self.at += 1;
             }
-            return inner;
+            return inner.trim_end().to_string();
         }
         match self.peek() {
             Some('\\') => {
@@ -200,7 +223,8 @@ impl<'a> Reader<'a> {
                 return match ch {
                     '\\' => "\\".into(),
                     ' ' | ',' | ';' | ':' | '!' => "space".into(),
-                    other if ESCAPED.contains(&other) => other.to_string(),
+                    // Escaped as Typst escapes it: `#`, `$` and `_` are syntax in math.
+                    other if ESCAPED.contains(&other) => format!("\\{other}"),
                     other => {
                         self.errors.push(Unsupported {
                             name: other.to_string(),
@@ -294,9 +318,21 @@ impl<'a> Reader<'a> {
                 '\\' => {
                     self.at += 1;
                     let piece = self.command();
+                    if OPERATORS.contains(&piece.as_str()) {
+                        separated(&mut out, &piece);
+                        continue;
+                    }
                     // A word meets a number with a space, or Typst reads one name.
-                    let word = piece.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic());
-                    if word && out.chars().last().is_some_and(|ch| ch.is_ascii_alphanumeric()) {
+                    let word = piece
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '"');
+                    if word
+                        && out
+                            .chars()
+                            .last()
+                            .is_some_and(|ch| ch.is_ascii_alphanumeric())
+                    {
                         out.push(' ');
                     }
                     out.push_str(&piece);
@@ -311,7 +347,7 @@ impl<'a> Reader<'a> {
                         self.at += 1;
                     }
                     out.push('(');
-                    out.push_str(&inner);
+                    out.push_str(inner.trim_end());
                     out.push(')');
                 }
                 '}' => break,
@@ -321,6 +357,30 @@ impl<'a> Reader<'a> {
                         out.push(' ');
                     }
                 }
+                // Comparisons are symbol names: `<-` is Typst's left arrow.
+                '<' | '>' => {
+                    self.at += 1;
+                    let equal = self.peek() == Some('=');
+                    if equal {
+                        self.at += 1;
+                    }
+                    let piece = match (ch, equal) {
+                        ('<', true) => "lt.eq",
+                        ('<', false) => "lt",
+                        (_, true) => "gt.eq",
+                        (_, false) => "gt",
+                    };
+                    separated(&mut out, piece);
+                }
+                // CJK is text in math: Typst would read it as one long name.
+                ch if is_cjk(ch) => {
+                    let mut run = String::new();
+                    while let Some(ch) = self.peek().filter(|ch| is_cjk(*ch)) {
+                        run.push(ch);
+                        self.at += 1;
+                    }
+                    separated(&mut out, &format!("\"{}\"", quote(&run)));
+                }
                 ch if ch.is_ascii_alphanumeric() => {
                     let mut run = String::new();
                     while let Some(ch) = self.peek().filter(|ch| ch.is_ascii_alphanumeric()) {
@@ -328,6 +388,14 @@ impl<'a> Reader<'a> {
                         self.at += 1;
                     }
                     out.push_str(&identifiers(&run));
+                }
+                '=' => {
+                    self.at += 1;
+                    separated(&mut out, "=");
+                }
+                _ if matches!(ch, '+' | '-') && after_operand(&out) => {
+                    self.at += 1;
+                    separated(&mut out, &ch.to_string());
                 }
                 other => {
                     self.at += 1;
@@ -352,6 +420,44 @@ fn identifiers(run: &str) -> String {
     }
 }
 
+/// `piece` with a space on both sides, so no neighbour can fuse with it.
+fn separated(out: &mut String, piece: &str) {
+    if !out.is_empty() && !out.ends_with(' ') {
+        out.push(' ');
+    }
+    out.push_str(piece);
+    out.push(' ');
+}
+
+/// Whether the markup so far ends in an operand, making `+` or `-` binary.
+fn after_operand(out: &str) -> bool {
+    let tail = out.trim_end();
+    // A relation or operation name (`lt`, `times`) is not an operand: the sign
+    // after it is unary.
+    if OPERATORS.iter().any(|name| tail.ends_with(name)) {
+        return false;
+    }
+    tail.chars()
+        .last()
+        .is_some_and(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ')' | ']' | '"'))
+}
+
+/// A character Typst reads as a name: CJK ideographs, kana, hangul and their
+/// punctuation, which only print inside a string.
+fn is_cjk(ch: char) -> bool {
+    matches!(ch,
+        '\u{2E80}'..='\u{2FFF}'
+            | '\u{3000}'..='\u{303F}'
+            | '\u{3040}'..='\u{30FF}'
+            | '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{AC00}'..='\u{D7AF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{FF00}'..='\u{FFEF}'
+            | '\u{20000}'..='\u{2FA1F}'
+    )
+}
+
 /// `text` as a Typst string's insides.
 fn quote(text: &str) -> String {
     text.replace('\\', "\\\\").replace('"', "\\\"")
@@ -369,7 +475,8 @@ pub fn latex_to_typst(source: &str) -> Result<String, Vec<Unsupported>> {
 
 /// The same, remembered by `source`: one conversion however many draws.
 pub fn cached(source: &str) -> Result<String, Vec<Unsupported>> {
-    static SEEN: OnceLock<Mutex<HashMap<String, Result<String, Vec<Unsupported>>>>> = OnceLock::new();
+    static SEEN: OnceLock<Mutex<HashMap<String, Result<String, Vec<Unsupported>>>>> =
+        OnceLock::new();
     let seen = SEEN.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(found) = seen.lock().expect("the conversion cache").get(source) {
         return found.clone();
