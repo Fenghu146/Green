@@ -45,6 +45,8 @@ green --capture out.png [--theme light|dark] [--width N] [--height N] [--wait-ms
    **这是判据的边界，不是 bug**：某台机器或某份文档的排版间隙真的超过 `--still-ms`，就会截到源码（一张合法、看着也像回事的 PNG）。遇到时把 `--still-ms` 调大，不必改代码重编。日志会写明实际等了多少毫秒、画了多少帧（`the picture stood still for 2000 ms over 12 frames; the run took 2630 ms`），能看出是"刚好够"还是"差一点"。
 6. **指针要离开窗口，而且要让它知道**：文档里的每个块都是带 `.hover()` 的 div，指针压在哪个块上，那个块就画一层 `colors.hover` 高亮。Windows 的 `mouse_position()` 是 `GetCursorPos` + `ScreenToClient`，没显示的窗口同样算数；更麻烦的是 gpui 的指针位置**只在 `bounds_changed` 时向平台重读**，其它时候用缓存。于是光把窗口移走不够：第一帧读到的还是"窗口还在指针下面"时的坐标，之后一直沿用——这正是"同一命令 8 次里 2 次多出一块灰底"的根因（每次运行鼠标位置不同，压中的块也不同）。
    修法：把窗口移到 `(-32000, -32000)`（`SetWindowPos`，不显示、不改尺寸），然后**在开头几帧再 `bounds_changed` 一次**，让 gpui 重新读到"指针在窗口外"（实测读出 `16259,16218`，窗口只有 `1187×689`）。移窗到生效有延迟，第一帧读到旧值，所以这一步要跨帧做。
+
+   **这不是产品 bug**：正常使用中平台在 `WM_MOVE`/`WM_SIZE` 时会调 `on_moved` → `bounds_changed`，指针随之重读（`gpui-pre-windows/src/events.rs` 的 `handle_move_msg`、`gpui-pre/src/window.rs` 的 `on_moved`）；实测把窗口下移 140 px、鼠标不动，悬停区跟着变了（gutter 按钮显隐，2056 像素差异）。capture 里之所以读到旧值，是因为移窗发生在`窗口创建期间`，那时 gpui 还没注册 moved 回调，这条回调不会来——所以只能自己补一次。
 7. **离屏读回靠基座**：`Window::render_to_image()` 在 gpui 的 `test-support` 特性下，Windows 侧接到 `WindowsWindow` 的 `render_to_image`（D3D 渲染器渲染到离屏目标再读回，**不 Present**）。因此 `ely-ui` 有 `capture` 特性（`gpui/test-support` + `gpui_windows/test-support`），`green` 有 `capture = ["ely-ui/capture"]`；发行包不开，体积与代码面不变。
 
 ```text
