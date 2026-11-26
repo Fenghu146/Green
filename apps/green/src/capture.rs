@@ -1,9 +1,39 @@
 //! `--capture`: one PNG of a document, without showing a window.
 
-use std::{path::PathBuf, time::Duration};
+#[cfg(feature = "capture")]
+use std::path::PathBuf;
+#[cfg(feature = "capture")]
+use std::time::Duration;
 
+#[cfg(feature = "capture")]
 const USAGE: &str = "green --capture out.png [--theme light|dark] [--width N] [--height N] [--wait-ms N] file.md";
 
+/// Runs a capture when the command line asks for one; `None` for an ordinary start.
+pub fn command_line() -> Option<i32> {
+    if !std::env::args().skip(1).any(|arg| arg == "--capture") {
+        return None;
+    }
+    #[cfg(not(feature = "capture"))]
+    {
+        // A build without the feature still says why it cannot capture.
+        eprintln!("green --capture: this build has no capture; build it with --features capture");
+        Some(2)
+    }
+    #[cfg(feature = "capture")]
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let request = match parse(&args) {
+            Ok(request) => request,
+            Err(said) => {
+                eprintln!("green --capture: {said}\n{USAGE}");
+                return Some(2);
+            }
+        };
+        Some(execute(request))
+    }
+}
+
+#[cfg(feature = "capture")]
 /// What a capture run needs.
 struct Request {
     output: PathBuf,
@@ -14,22 +44,7 @@ struct Request {
     settle: Duration,
 }
 
-/// Runs a capture when the command line asks for one; `None` for an ordinary start.
-pub fn command_line() -> Option<i32> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if !args.iter().any(|arg| arg == "--capture") {
-        return None;
-    }
-    let request = match parse(&args) {
-        Ok(request) => request,
-        Err(said) => {
-            eprintln!("green --capture: {said}\n{USAGE}");
-            return Some(2);
-        }
-    };
-    Some(execute(request))
-}
-
+#[cfg(feature = "capture")]
 fn parse(args: &[String]) -> Result<Request, String> {
     let mut output = None;
     let mut file = None;
@@ -77,6 +92,7 @@ fn parse(args: &[String]) -> Result<Request, String> {
     })
 }
 
+#[cfg(feature = "capture")]
 fn number(value: &str, name: &str) -> Result<f32, String> {
     let number: f32 = value
         .parse()
@@ -87,39 +103,31 @@ fn number(value: &str, name: &str) -> Result<f32, String> {
     Ok(number)
 }
 
+#[cfg(feature = "capture")]
 fn execute(request: Request) -> i32 {
-    #[cfg(not(feature = "capture"))]
-    {
-        let _ = request;
-        eprintln!("green --capture: this build has no capture; build it with --features capture");
-        2
-    }
-    #[cfg(feature = "capture")]
-    {
-        let file = match std::fs::canonicalize(&request.file) {
-            Ok(file) => file,
-            Err(error) => {
-                eprintln!("green --capture: {} does not read: {error}", request.file.display());
-                return 2;
-            }
-        };
-        let data = std::env::temp_dir().join(format!("green-capture-{}", std::process::id()));
-        // Before anything reads a setting: its own folder, its own theme.
-        unsafe {
-            std::env::set_var("ELY_DATA_ROOT", &data);
-            std::env::set_var("ELY_APPEARANCE", &request.theme);
+    let file = match std::fs::canonicalize(&request.file) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("green --capture: {} does not read: {error}", request.file.display());
+            return 2;
         }
-        if let Err(error) = std::fs::create_dir_all(&data) {
-            eprintln!("green --capture: a folder of its own is not there: {error}");
-            return 5;
-        }
-        let shot = ely_ui::capture::Shot {
-            output: request.output,
-            size: gpui::size(gpui::px(request.width), gpui::px(request.height)),
-            settle: request.settle,
-        };
-        let code = ely_ui::capture::run(ely_platform::AppId::Mark, shot, vec![file], crate::desk::open);
-        let _ = std::fs::remove_dir_all(&data);
-        code
+    };
+    let data = std::env::temp_dir().join(format!("green-capture-{}", std::process::id()));
+    // Before anything reads a setting: its own folder, its own theme.
+    unsafe {
+        std::env::set_var("ELY_DATA_ROOT", &data);
+        std::env::set_var("ELY_APPEARANCE", &request.theme);
     }
+    if let Err(error) = std::fs::create_dir_all(&data) {
+        eprintln!("green --capture: a folder of its own is not there: {error}");
+        return 5;
+    }
+    let shot = ely_ui::capture::Shot {
+        output: request.output,
+        size: gpui::size(gpui::px(request.width), gpui::px(request.height)),
+        settle: request.settle,
+    };
+    let code = ely_ui::capture::run(ely_platform::AppId::Mark, shot, vec![file], crate::desk::open);
+    let _ = std::fs::remove_dir_all(&data);
+    code
 }
