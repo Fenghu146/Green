@@ -618,8 +618,9 @@ fn rows(body: &str) -> Vec<String> {
     rows
 }
 
-/// A run of letters and digits: numbers stay whole, a name means its letters
-/// one by one (`B052H` is B, 0, 5, 2, H in italic, not a word in quotes).
+/// Every bare ASCII alphanumeric run is spelled out character by character:
+/// LaTeX has no identifiers, so `nf` is n·f and `n2` is n·2. Only a run of
+/// digits stays whole; commands keep their own names before reaching here.
 fn identifiers(run: &str) -> String {
     match run.chars().all(|ch| ch.is_ascii_digit()) {
         true => run.to_string(),

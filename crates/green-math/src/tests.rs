@@ -40,6 +40,21 @@ fn operators_name_themselves() {
 }
 
 #[test]
+fn bare_letter_runs_split_into_variables() {
+    // The real notes write `nf`, `ne` and `n2` bare; in LaTeX each is a run
+    // of single italic variables, never one unknown Typst identifier.
+    assert_eq!(typst("nf"), "n f");
+    assert_eq!(typst("ne"), "n e");
+    assert_eq!(typst("n2"), "n 2");
+    assert_eq!(typst("B052H"), "B 0 5 2 H");
+    assert_eq!(typst(r"n2^n"), "n 2^n");
+    // A backslash makes a command, which keeps its own name.
+    assert_eq!(typst(r"\sin x"), "sin x");
+    // Bare `sin` really is s·i·n in LaTeX.
+    assert_eq!(typst("sin x"), "s i n x");
+}
+
+#[test]
 fn a_zero_width_space_is_whitespace() {
     // The notes glue formulas to Chinese with U+200B; it is not a glyph.
     assert_eq!(typst("\u{200b}\\sqrt3\u{200b}"), "sqrt(3)");
@@ -208,6 +223,15 @@ fn every_covered_sample_compiles_in_typst() {
             "\\sum_{m=3}^{\\infty}\\frac{1}{m^2}",
             "\\sqrt3",
             "\\sqrt{3}",
+            // The real notes' bare adjacent variables, which used to read as
+            // one unknown variable and take the whole export down.
+            "nf",
+            "ne",
+            "n2",
+            "n2^n",
+            "sin x",
+            "\\sin x",
+            "(\\frac ne)^n",
         ]
         .map(String::from),
     );
