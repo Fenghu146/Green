@@ -119,7 +119,7 @@ Node 默认就是 UTF-8。
   "apiVersion": 1,
   "extensions": [".csv"],
   "command": ["python", "csv_plugin.py"],
-  "timeoutMs": 3000,
+  "timeoutMs": 8000,
   "enabled": true,
   "capabilities": ["blocks@1"]
 }
@@ -133,11 +133,11 @@ Node 默认就是 UTF-8。
 | `apiVersion` | 是 | — | 整数，这一版只认 `1` |
 | `extensions` | 是 | — | 至少一个；`csv` 和 `.csv` 等价，统一成小写带点 |
 | `command` | 是 | — | 非空数组；第一项是可执行文件（走 `PATH`），其余是参数；工作目录是插件自己的文件夹 |
-| `timeoutMs` | 否 | `3000` | 一次运行的上限，允许 `50`–`30000`；超过上限的清单被拒绝加载 |
+| `timeoutMs` | 否 | `8000` | 一次运行的上限，允许 `50`–`30000`；超过上限的清单被拒绝加载 |
 | `enabled` | 否 | `true` | `false` 时仍加载，但永不选中 |
 | `capabilities` | 否 | `["blocks@1"]` | 声明会产出的能力 |
 
-`timeoutMs` 从 spawn 算到进程退出：Node/Python 冷启动常吃 200–500 ms，给足余量。默认 3000，上限 30000，超了拒绝加载。
+`timeoutMs` 从 spawn 算到进程退出，含冷启动。本机 Node 冷启 200–500 ms，但 `windows-latest` 上同一个插件测试通过时用时 3.59 s、失败时 7.47 s（3000 ms 超时加两次 2 s 管道关闭等待）；杀毒扫描、机械盘、Node/Python 首次启动都能把冷启推到秒级。默认 8000，上限 30000，超了拒绝加载。首次打开与后续打开用同一个 `timeoutMs`，没有单独的冷启动宽限。
 
 规则：
 
@@ -160,7 +160,7 @@ Node 默认就是 UTF-8。
 
 | 情况 | Green 做什么 |
 | --- | --- |
-| 超时（`timeoutMs`，含进程启动） | 杀掉进程，文件按文本打开 |
+| 超时（`timeoutMs`，含进程启动） | 杀掉进程，文件按文本打开；状态区明确说“插件超时（N ms）。可在清单里调大 timeoutMs。”，与契约错误分开 |
 | 非零退出 | 文件按文本打开；原因带退出码和 stderr 末尾 |
 | stdout 不是合法 JSON，或 `apiVersion` 不对 | 同上 |
 | 可执行文件找不到 | 同上 |

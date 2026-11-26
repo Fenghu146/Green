@@ -11,7 +11,7 @@ use std::{
 use ely_gpui_component::primitives::Severity;
 use ely_office::{Opening as _, Tabs as _, files};
 use gpui::{App, Context, Global};
-use green_plugins::{Host, Problem, View};
+use green_plugins::{Host, Problem, Reason, View};
 
 use crate::desk::Desk;
 
@@ -103,11 +103,18 @@ impl Desk {
             }
             View::Plain { reason } => {
                 log::warn!("mark: {name} shows as text: {reason}");
-                let said = ely_ui::i18n::text(
-                    cx,
-                    "office.error.open",
-                    &[("name", &name), ("error", &reason.to_string())],
-                );
+                let said = match &reason {
+                    Reason::Timeout(ms) => ely_ui::i18n::text(
+                        cx,
+                        "office.error.plugin_timeout",
+                        &[("name", &name), ("ms", &ms.to_string())],
+                    ),
+                    _ => ely_ui::i18n::text(
+                        cx,
+                        "office.error.open",
+                        &[("name", &name), ("error", &reason.to_string())],
+                    ),
+                };
                 self.toast(said, Severity::Warning, cx);
                 self.open_file(path, cx);
             }
@@ -279,12 +286,12 @@ mod tests {
         let (desk, cx) = start(cx, data.path());
         open(&desk, &slow, cx);
         assert_eq!(text(&desk, cx), "a,b\n1,2\n");
+        let said = toasts(&desk, cx);
         assert!(
-            toasts(&desk, cx)
-                .iter()
-                .any(|said| said.contains("did not finish within 200 ms")),
-            "{:?}",
-            toasts(&desk, cx)
+            said.iter().any(|line| {
+                line.contains("plugin timed out after 200 ms") && line.contains("timeoutMs")
+            }),
+            "{said:?}"
         );
     }
 

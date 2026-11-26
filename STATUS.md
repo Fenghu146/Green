@@ -35,9 +35,11 @@
 `crates/green-plugins/tests/process.rs` 的 Node 用例在 CI 上偶发 `blocks = None`：run 45808353158 失败；
 同样的代码在 run 45800810110 通过，但用时 3.59 s，失败那次用时 7.47 s。该测试的清单当时没写
 `timeoutMs`，走默认 3000 ms；超时后 supervisor 还要各等 2 s 关 stdout / stderr 管道。把 PATH 上的
-`node` 换成延迟 2.95 s 的壳后，原清单 10/10 失败，显式 `timeoutMs: 10000` 后 10/10 通过。
-本机 Node v24.22.1 和 v22.23.2 无延迟时，两种清单各跑 30 次都是 0/30 失败。
-据此这是阈值附近的 runner 差异，不是 JSON 契约、路径编码、CRLF / BOM、8 MB 截断或测试间并发；
-只放宽了测试清单，`examples/plugins/log/manifest.json` 的 3000 未动。
-失败断言现在打印 `View` 的 `reason`：`Timeout(...)` 是冷启动超出测试预算，`Exit` / `InvalidJson`
-才指向插件本身；以后它在更慢的 runner 上再红，先看 reason 与耗时，不要改插件输出。
+`node` 换成延迟 2.95 s 的壳后，旧默认 3000 ms 下 10/10 失败，8000 ms 默认下 10/10 通过。
+本机 Node v24.22.1 和 v22.23.2 无延迟时，两种超时各跑 30 次都是 0/30 失败。
+据此这是阈值附近的 runner 差异，不是 JSON 契约、路径编码、CRLF / BOM、8 MB 截断或测试间并发。
+产品默认值现在是 8000（上限仍 30000），首次与后续打开同值；测试清单不再写 `timeoutMs`，直接走默认，
+`examples/plugins/log/manifest.json` 也从 3000 升到 8000。
+超时降级时状态栏用 `office.error.plugin_timeout` 单独说“插件超时（N ms）……timeoutMs”，
+契约错误仍走 `office.error.open`；测试断言打印 `View` 的 reason，`Timeout(...)` 与 `Exit` / `InvalidJson`
+一眼可分。以后再红先看 reason 与耗时，不要改插件输出。

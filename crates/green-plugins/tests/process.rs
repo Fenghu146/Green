@@ -135,13 +135,12 @@ fn the_shipped_log_plugin_speaks_the_same_contract_from_node() {
     let folder = root.path().join("log");
     std::fs::create_dir_all(&folder).expect("a folder");
     std::fs::copy(source.join("log_plugin.js"), folder.join("run.js")).expect("the script");
-    // windows-latest took 3.59 s once, past the 3 s default: this test flaked.
+    // windows-latest took 3.59 s once; the 8 s default now covers that cold start.
     std::fs::write(
         folder.join("manifest.json"),
         format!(
             r#"{{"id": "log", "version": "0.1.0", "apiVersion": 1,
-                "extensions": [".log"], "command": ["{node}", "run.js"],
-                "timeoutMs": 10000}}"#
+                "extensions": [".log"], "command": ["{node}", "run.js"]}}"#
         ),
     )
     .expect("a manifest");
