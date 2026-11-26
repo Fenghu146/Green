@@ -2,6 +2,8 @@
 
 pub(super) const ES: &[(&str, &str)] = &[
     ("mark.pane.files", "Archivos"),
+    ("mark.tool.insert", "Insertar"),
+    ("mark.tool.more", "Más"),
     ("mark.pane.outline", "Esquema"),
     ("mark.pane.search", "Buscar"),
     ("mark.recent", "Recientes"),

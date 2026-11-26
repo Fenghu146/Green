@@ -2,6 +2,8 @@
 
 pub(super) const JA: &[(&str, &str)] = &[
     ("mark.pane.files", "ファイル"),
+    ("mark.tool.insert", "挿入"),
+    ("mark.tool.more", "その他"),
     ("mark.pane.outline", "アウトライン"),
     ("mark.pane.search", "検索"),
     ("mark.recent", "最近のファイル"),

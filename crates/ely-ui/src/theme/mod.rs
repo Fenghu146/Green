@@ -1,4 +1,4 @@
-use ely_gpui_component::theme::{ActiveTheme as _, Mode, Theme};
+use ely_gpui_component::theme::{Mode, Theme};
 use ely_platform::settings::{Appearance, Shared, UI_TEXT_SIZES};
 use ely_platform::{accessibility, env, omarchy_current_dir};
 use gpui::{App, Global, SharedString, Window, WindowAppearance};
@@ -50,7 +50,7 @@ impl Global for OwnFont {}
 
 /// Applies motion and appearance settings, and starts following Omarchy.
 pub fn install(cx: &mut App) {
-    cx.set_global(OwnFont(cx.theme().font_family.clone()));
+    cx.set_global(OwnFont(crate::fonts::FAMILY.into()));
     text(cx);
     motion(cx);
     scrollbars(cx);

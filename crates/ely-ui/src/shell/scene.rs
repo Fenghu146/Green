@@ -50,7 +50,7 @@ fn icon(app: AppId) -> &'static [u8] {
         AppId::Pdf => include_bytes!("../../../../assets/icons/ely-pdf.png"),
         AppId::Mail => include_bytes!("../../../../assets/icons/ely-mail.png"),
         AppId::Tree => include_bytes!("../../../../assets/icons/ely-tree.png"),
-        AppId::Mark => include_bytes!("../../../../assets/icons/ely-mark.png"),
+        AppId::Mark => include_bytes!("../../../../assets/icons/green.png"),
         AppId::Agent => include_bytes!("../../../../assets/icons/ely-agent.png"),
     }
 }

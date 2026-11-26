@@ -2,6 +2,8 @@
 
 pub(super) const KO: &[(&str, &str)] = &[
     ("mark.pane.files", "파일"),
+    ("mark.tool.insert", "삽입"),
+    ("mark.tool.more", "더 보기"),
     ("mark.pane.outline", "개요"),
     ("mark.pane.search", "검색"),
     ("mark.recent", "최근 파일"),

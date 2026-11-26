@@ -2,6 +2,8 @@
 
 pub(super) const VI: &[(&str, &str)] = &[
     ("mark.pane.files", "Tệp tin"),
+    ("mark.tool.insert", "Chèn"),
+    ("mark.tool.more", "Thêm"),
     ("mark.pane.outline", "Dàn bài"),
     ("mark.pane.search", "Tìm kiếm"),
     ("mark.recent", "Gần đây"),

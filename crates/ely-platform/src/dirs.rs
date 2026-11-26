@@ -40,7 +40,7 @@ fn real_home() -> Result<PathBuf> {
 
 /// The suite's folder in a platform's local data folder.
 fn suite_home(base: &Path) -> PathBuf {
-    base.join("ElyOffice")
+    base.join("Green")
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -87,16 +87,16 @@ mod tests {
     use crate::AppId;
 
     #[test]
-    fn the_suite_folder_is_elyoffice_in_the_platform_folder() {
+    fn the_suite_folder_is_green_in_the_platform_folder() {
         let base = Path::new("/somewhere/local-data");
-        assert_eq!(suite_home(base), base.join("ElyOffice"));
+        assert_eq!(suite_home(base), base.join("Green"));
     }
 
     #[test]
     fn each_app_has_its_own_directory_under_the_root() {
         let root = test_root();
         assert_eq!(data_dir(AppId::Doc).unwrap(), root.join("ely-doc"));
-        assert_eq!(data_dir(AppId::Mail).unwrap(), root.join("ely-mail"));
+        assert_eq!(data_dir(AppId::Mark).unwrap(), root.join("green"));
     }
 
     /// Run by the guard test in its own process.

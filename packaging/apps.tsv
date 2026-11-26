@@ -4,5 +4,5 @@ ely-show	ElyShow	Office;Presentation;	1	MIT AND MPL-2.0	Presentations (PPTX, ODP
 ely-pdf	ElyPDF	Office;Viewer;	1	MIT AND AGPL-3.0-or-later	PDF reading and editing, OCR, signatures
 ely-mail	ElyMail	Network;Email;	1	MIT	Mail over IMAP, POP3 and SMTP
 ely-tree	ElyTree	Development;RevisionControl;	1	MIT AND GPL-2.0-only	Git client
-ely-mark	ElyMark	Utility;TextEditor;	1	MIT AND AGPL-3.0-or-later AND GPL-2.0-only	Markdown editor
+green	Green	Utility;TextEditor;	1	GPL-3.0-or-later	Markdown notes
 ely-agent	ElyAgent	Development;	2	MIT	Coding agent

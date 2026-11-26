@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod fonts;
 #[cfg(any(test, feature = "test-support"))]
 mod ending;
 pub mod i18n;

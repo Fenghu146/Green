@@ -295,20 +295,20 @@ mod tests {
             AppId::Mark,
         );
         assert!(places.contains(&PathBuf::from(format!(
-            "/Apps/ElyMark.app/Contents/MacOS/ely-mark{suffix}"
+            "/Apps/Green.app/Contents/MacOS/green{suffix}"
         ))));
         let places = super::beside(Path::new("/target/debug/ely-tree"), AppId::Mark);
         assert_eq!(
             places[0],
-            PathBuf::from(format!("/target/debug/ely-mark{suffix}"))
+            PathBuf::from(format!("/target/debug/green{suffix}"))
         );
         let places = super::beside(Path::new("/Ely Office/ElyTree/ely-tree.exe"), AppId::Mark);
         assert!(places.contains(&PathBuf::from(format!(
-            "/Ely Office/ElyMark/ely-mark{suffix}"
+            "/Ely Office/Green/green{suffix}"
         ))));
         let places = super::beside(Path::new("/opt/ely-office/ely-tree/bin/ely-tree"), AppId::Mark);
         assert!(places.contains(&PathBuf::from(format!(
-            "/opt/ely-office/ely-mark/bin/ely-mark{suffix}"
+            "/opt/ely-office/green/bin/green{suffix}"
         ))));
     }
 }

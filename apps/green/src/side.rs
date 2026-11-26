@@ -86,6 +86,14 @@ impl Side {
         }
     }
 
+    /// Shows the outline; the toolbar's 目录 opens here.
+    pub(crate) fn show_outline(&mut self, cx: &mut Context<Self>) {
+        if self.pane != Pane::Outline {
+            self.pane = Pane::Outline;
+            cx.notify();
+        }
+    }
+
     /// Lines holding the query, off the window.
     fn search(&mut self, cx: &mut Context<Self>) {
         let query = self.query.read(cx).text().trim().to_owned();

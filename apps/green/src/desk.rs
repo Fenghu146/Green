@@ -453,6 +453,7 @@ impl Render for Desk {
             true => Shell::new(title, &self.core.focus),
             false => Shell::new(title, &self.core.focus)
                 .tabs(self.tabs(cx))
+                .toolbar(Some(self.toolbar(cx)))
                 .left(Some(self.side.clone().into()))
                 .status(self.status(cx)),
         }

@@ -47,7 +47,7 @@ ring = "0.17"
 stringprep = "0.1"
 tempfile = "3"
 url = "2"
-unicase = "2.10"
+typst = { version = "0.15", default-features = false }
 ureq = { version = "3", features = ["socks-proxy"] }
 unicode-segmentation = "1"
 unicode-normalization = "0.1"

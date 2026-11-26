@@ -1,4 +1,5 @@
 //! The shell document apps share (§6), over any engine.
+//! Green keeps it as its tab, open/save and recovery layer.
 
 pub mod chart;
 mod autosave;

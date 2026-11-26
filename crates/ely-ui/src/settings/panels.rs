@@ -24,6 +24,9 @@ pub(crate) struct Panels {
 
 impl Global for Panels {}
 
+/// The side panels, folded away: the left starts folded, content first.
+const FOLDED: (bool, bool) = (true, false);
+
 /// Reads `app`'s widths; a bad entry is reported, not guessed.
 pub(super) fn install(app: AppId, cx: &mut App) {
     let store = Store::app(app);
@@ -34,7 +37,7 @@ pub(super) fn install(app: AppId, cx: &mut App) {
     let ((left, right), hidden, split) = read.unwrap_or_else(|error| {
         log::error!("settings: panels unreadable: {error}");
         cx.global_mut::<super::Current>().app_error.insert(super::PANELS, error.to_string().into());
-        ((None, None), (false, false), None)
+        ((None, None), FOLDED, None)
     });
     cx.set_global(Panels { store: store.ok(), left, right, hidden, split, moves: 0, saved: 0 });
     bind(cx);
@@ -52,7 +55,7 @@ type Widths = (Option<Pixels>, Option<Pixels>);
 fn parse(saved: Option<&Value>) -> io::Result<(Widths, (bool, bool), Option<f32>)> {
     let invalid = |why: String| io::Error::new(io::ErrorKind::InvalidData, format!("settings: panels {why}"));
     let fields = match saved {
-        None | Some(Value::Null) => return Ok(((None, None), (false, false), None)),
+        None | Some(Value::Null) => return Ok(((None, None), FOLDED, None)),
         Some(Value::Object(fields)) => fields,
         Some(other) => return Err(invalid(format!("cannot be {other}"))),
     };
@@ -63,8 +66,8 @@ fn parse(saved: Option<&Value>) -> io::Result<(Widths, (bool, bool), Option<f32>
         }
         Some(other) => Err(invalid(format!("{side} cannot be {other}"))),
     };
-    let hidden = |key: &str| match fields.get(key) {
-        None | Some(Value::Null) => Ok(false),
+    let hidden = |key: &str, folded: bool| match fields.get(key) {
+        None | Some(Value::Null) => Ok(folded),
         Some(Value::Bool(hidden)) => Ok(*hidden),
         Some(other) => Err(invalid(format!("{key} cannot be {other}"))),
     };
@@ -73,13 +76,13 @@ fn parse(saved: Option<&Value>) -> io::Result<(Widths, (bool, bool), Option<f32>
         Some(Value::Number(n)) if n.as_f64().is_some_and(|n| n > 0.0 && n < 1.0) => n.as_f64().map(|n| n as f32),
         Some(other) => return Err(invalid(format!("split cannot be {other}"))),
     };
-    Ok(((width("left")?, width("right")?), (hidden("left_hidden")?, hidden("right_hidden")?), split))
+    Ok(((width("left")?, width("right")?), (hidden("left_hidden", FOLDED.0)?, hidden("right_hidden", FOLDED.1)?), split))
 }
 
 /// Defaults in force, nothing kept: for tests.
 #[cfg(any(test, feature = "test-support"))]
 pub(super) fn install_defaults(cx: &mut App) {
-    cx.set_global(Panels { store: None, left: None, right: None, hidden: (false, false), split: None, moves: 0, saved: 0 });
+    cx.set_global(Panels { store: None, left: None, right: None, hidden: FOLDED, split: None, moves: 0, saved: 0 });
     bind(cx);
 }
 
@@ -187,19 +190,20 @@ mod tests {
     use serde_json::json;
 
     #[gpui::test]
-    fn a_fold_is_kept_and_reads_back(cx: &mut gpui::TestAppContext) {
+    fn the_outline_starts_folded_and_a_fold_is_kept(cx: &mut gpui::TestAppContext) {
         let dir = tempfile::tempdir().unwrap();
         let store = ely_platform::settings::Store::at(dir.path().join("settings.json"));
         cx.update(|cx| {
             super::super::install_defaults(cx);
             cx.global_mut::<super::Panels>().store = Some(store.clone());
-            super::show(true, false, cx);
             assert!(!super::shown(true, cx) && super::shown(false, cx));
+            super::show(true, true, cx);
+            assert!(super::shown(true, cx));
         });
         cx.executor().advance_clock(super::SETTLE);
         cx.run_until_parked();
         let kept = store.read().unwrap();
-        assert_eq!(super::parse(kept.get(super::KEY)).unwrap(), ((None, None), (true, false), None));
+        assert_eq!(super::parse(kept.get(super::KEY)).unwrap(), ((None, None), (false, false), None));
     }
 
     #[gpui::test]
@@ -215,13 +219,13 @@ mod tests {
         cx.executor().advance_clock(super::SETTLE);
         cx.run_until_parked();
         let kept = store.read().unwrap();
-        assert_eq!(super::parse(kept.get(super::KEY)).unwrap(), ((None, None), (false, false), Some(0.25)));
+        assert_eq!(super::parse(kept.get(super::KEY)).unwrap(), ((None, None), (true, false), Some(0.25)));
     }
 
     #[test]
     fn widths_and_folds_read_strictly() {
-        assert_eq!(super::parse(None).unwrap(), ((None, None), (false, false), None));
-        assert_eq!(super::parse(Some(&json!({"left": 300, "right": null}))).unwrap(), ((Some(px(300.0)), None), (false, false), None));
+        assert_eq!(super::parse(None).unwrap(), ((None, None), (true, false), None));
+        assert_eq!(super::parse(Some(&json!({"left": 300, "right": null}))).unwrap(), ((Some(px(300.0)), None), (true, false), None));
         let folded = json!({"left": null, "right": null, "left_hidden": true, "right_hidden": false, "split": 0.4});
         assert_eq!(super::parse(Some(&folded)).unwrap(), ((None, None), (true, false), Some(0.4)));
         let bad = [json!({"left": "broken", "right": 320}), json!({"left": -4}), json!([1]), json!({"left_hidden": 1}), json!({"split": 1}), json!({"split": "half"})];

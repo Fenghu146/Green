@@ -97,7 +97,10 @@ fn open<V: Render>(
     cx: &mut App,
 ) {
     // Names the app's system notifications.
-    cx.set_app_identity(&format!("ElyOffice.{}", app.name()), app.name());
+    cx.set_app_identity(&format!("Green.{}", app.name()), app.name());
+    if let Err(error) = crate::fonts::install(cx) {
+        startup::fail(app, &format!("the bundled fonts did not load: {error:#}"));
+    }
     if let Err(error) = ely_gpui_component::init(cx) {
         startup::fail(app, &format!("the components did not start: {error:#}"));
     }

@@ -27,7 +27,11 @@ impl AppId {
 
     /// The macOS bundle identifier `packaging/macos/bundle.sh` writes.
     pub fn bundle_id(self) -> String {
-        format!("ely.zacharyzhang.office.{}", &self.slug()["ely-".len()..])
+        match self {
+            // Green is its own product, not an Ely Office app.
+            AppId::Mark => "com.fenghu.green".into(),
+            other => format!("ely.zacharyzhang.office.{}", &other.slug()["ely-".len()..]),
+        }
     }
 
     pub fn name(self) -> &'static str {
@@ -38,7 +42,7 @@ impl AppId {
             AppId::Pdf => "ElyPDF",
             AppId::Mail => "ElyMail",
             AppId::Tree => "ElyTree",
-            AppId::Mark => "ElyMark",
+            AppId::Mark => "Green",
             AppId::Agent => "ElyAgent",
         }
     }
@@ -51,7 +55,7 @@ impl AppId {
             AppId::Pdf => "ely-pdf",
             AppId::Mail => "ely-mail",
             AppId::Tree => "ely-tree",
-            AppId::Mark => "ely-mark",
+            AppId::Mark => "green",
             AppId::Agent => "ely-agent",
         }
     }
@@ -66,6 +70,7 @@ mod tests {
     #[test]
     fn bundle_ids_match_the_packaging() {
         assert_eq!(Doc.bundle_id(), "ely.zacharyzhang.office.doc");
+        assert_eq!(Mark.bundle_id(), "com.fenghu.green");
         let script = include_str!("../../../packaging/macos/bundle.sh");
         assert!(script.contains("prefix=ely.zacharyzhang.office\n"));
         assert!(script.contains("<string>$prefix.${slug#ely-}</string>"));
@@ -77,7 +82,7 @@ mod tests {
         assert_eq!(
             names,
             [
-                "ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyMail", "ElyTree", "ElyMark",
+                "ElyDoc", "ElyTable", "ElyShow", "ElyPDF", "ElyMail", "ElyTree", "Green",
                 "ElyAgent"
             ]
         );
@@ -95,7 +100,7 @@ mod tests {
                 "ely-pdf",
                 "ely-mail",
                 "ely-tree",
-                "ely-mark",
+                "green",
                 "ely-agent"
             ]
         );

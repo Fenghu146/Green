@@ -2,6 +2,8 @@
 
 pub(super) const EN: &[(&str, &str)] = &[
     ("mark.pane.files", "Files"),
+    ("mark.tool.insert", "Insert"),
+    ("mark.tool.more", "More"),
     ("mark.pane.outline", "Outline"),
     ("mark.pane.search", "Search"),
     ("mark.recent", "Recent"),
@@ -116,6 +118,8 @@ pub(super) const EN: &[(&str, &str)] = &[
 
 pub(super) const ZH_CN: &[(&str, &str)] = &[
     ("mark.pane.files", "文件"),
+    ("mark.tool.insert", "插入"),
+    ("mark.tool.more", "更多"),
     ("mark.pane.outline", "大纲"),
     ("mark.pane.search", "搜索"),
     ("mark.recent", "最近"),
