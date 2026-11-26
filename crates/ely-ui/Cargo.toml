@@ -14,6 +14,7 @@ ely-ipc.workspace = true
 ely-platform.workspace = true
 ely-start.workspace = true
 gpui.workspace = true
+image.workspace = true
 directories.workspace = true
 futures.workspace = true
 semver.workspace = true
@@ -29,6 +30,7 @@ raw-window-handle = "0.6"
 windows-sys.workspace = true
 
 [features]
+capture = ["gpui/test-support", "gpui_windows/test-support"]
 frames = ["gpui/profiler"]
 test-support = []
 

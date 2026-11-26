@@ -4,6 +4,7 @@
 mod attach;
 mod autosave;
 mod blocks;
+mod capture;
 mod clip;
 mod compare;
 mod count;
@@ -30,6 +31,9 @@ mod view;
 use ely_platform::AppId;
 
 fn main() {
+    if let Some(code) = capture::command_line() {
+        std::process::exit(code);
+    }
     if let Some(code) = remote::command_line() {
         std::process::exit(code);
     }

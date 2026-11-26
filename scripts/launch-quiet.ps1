@@ -1,27 +1,26 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-  Opens a GUI program where the user cannot see or focus it, screenshots its
+  Starts a GUI program without giving it the user's focus, screenshots its
   window, then ends it.
 
 .DESCRIPTION
-  Two ways, both leaving the user's foreground window alone:
+  The fallback for pictures of a real window: `green --capture` (docs/capture-mode.md)
+  is the quiet way whenever the frame itself is all that is wanted.
 
-  desktop     The program's windows live on a desktop of their own
-              (CreateDesktop). Nothing appears on the user's desktop, and no
-              window of it can take focus. The frame is asked of the window
-              itself with PrintWindow(PW_RENDERFULLCONTENT), never from the
-              screen.
-  noactivate  The program's windows are on the user's desktop but shown with
-              SW_SHOWNOACTIVATE and pushed to the bottom of the z-order: visible
-              only where nothing else covers that place, never focused.
+  The point here is one thing: GetForegroundWindow() reads the same before and
+  after. The picture comes from the window itself (PrintWindow), never from the
+  screen, so it works whether or not the user is looking at that desktop.
 
-  auto (the default) uses desktop. A blank frame is an error, never a silent
-  switch to a visible window: the report says to try noactivate by name.
+  A new window lands on whichever virtual desktop is active when it appears,
+  and stays on it afterwards; the report says which one that was, so a run can
+  show whether the window turned up in front of the user's work. Moving a
+  window to another desktop is not offered: the documented interface refuses a
+  window owned by another process (E_ACCESSDENIED).
 
-  Green itself is told ELY_SMOKE=hold (the product's own no-activate start) and
-  given a data folder of its own, so it neither takes focus nor meets the copy
-  the user is running.
+  Green is told ELY_SMOKE=hold, the product's own no-activate start, and given
+  a data folder of its own, so it neither takes focus nor meets the copy the
+  user is running.
 
 .PARAMETER Exe
   The program to start, by path.
@@ -31,9 +30,6 @@
 
 .PARAMETER Screenshot
   Where the window's PNG goes.
-
-.PARAMETER Mode
-  auto (desktop), desktop, or noactivate.
 
 .PARAMETER Theme
   Sets ELY_APPEARANCE when given (light, dark, system).
@@ -46,11 +42,18 @@
 
 .PARAMETER Report
   Writes what happened as JSON: the foreground window before and after, which
-  frame came back, and how many of the program's windows were on the user's
-  desktop.
+  frame came back, which virtual desktop the window landed on, and how many of
+  the program's windows were on the user's desktop.
 
 .PARAMETER Screen
   Also saves a picture of the user's screen while the program runs.
+
+.PARAMETER TimeoutSeconds
+  How long to wait for the window, and for the log's first-frame line.
+
+.PARAMETER SettleMs
+  How long the window draws before the picture is taken. Typst sets formulas in
+  the background, so the first frame is often not the finished one.
 
 .PARAMETER KeepData
   Keeps the temporary data folder.
@@ -67,7 +70,6 @@ param(
     [Parameter(Mandatory = $true)][string]$Exe,
     [string]$Arguments = '',
     [Parameter(Mandatory = $true)][string]$Screenshot,
-    [ValidateSet('auto', 'desktop', 'noactivate')][string]$Mode = 'auto',
     [ValidateSet('light', 'dark', 'system')][string]$Theme,
     [hashtable]$Environment = @{ ELY_SMOKE = 'hold' },
     [string]$DataRoot,
@@ -84,7 +86,6 @@ Add-Type -AssemblyName System.Drawing
 if (-not ('Quiet.Native' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -109,14 +110,19 @@ namespace Quiet
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 
+    /// The documented virtual-desktop interface: reading only, never moving.
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("A5CD92FF-29BE-454C-8D04-D82879FB3F1B")]
+    interface IVirtualDesktopManager
+    {
+        int IsWindowOnCurrentVirtualDesktop(IntPtr topLevelWindow, out int onCurrentDesktop);
+        int GetWindowDesktopId(IntPtr topLevelWindow, out Guid desktopId);
+        int MoveWindowToDesktop(IntPtr topLevelWindow, ref Guid desktopId);
+    }
+
     public static class Native
     {
         public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        static extern IntPtr CreateDesktopW(string name, IntPtr device, IntPtr devmode, int flags, uint access, IntPtr attributes);
-        [DllImport("user32.dll", SetLastError = true)] public static extern bool CloseDesktop(IntPtr desktop);
-        [DllImport("user32.dll", SetLastError = true)] public static extern bool EnumDesktopWindows(IntPtr desktop, EnumProc callback, IntPtr data);
         [DllImport("user32.dll", SetLastError = true)] public static extern bool EnumWindows(EnumProc callback, IntPtr data);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr hwnd, StringBuilder text, int count);
@@ -142,7 +148,6 @@ namespace Quiet
         [DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
         [DllImport("kernel32.dll")] public static extern bool TerminateProcess(IntPtr process, uint code);
 
-        public const uint GENERIC_ALL = 0x10000000;
         public const uint STARTF_USESHOWWINDOW = 0x00000001;
         public const short SW_SHOWNOACTIVATE = 4;
         public const uint HWND_BOTTOM = 1;
@@ -169,21 +174,11 @@ namespace Quiet
             height = GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
         }
 
-        /// A desktop of this window station, or an exception.
-        public static IntPtr NewDesktop(string name)
-        {
-            var desktop = CreateDesktopW(name, IntPtr.Zero, IntPtr.Zero, 0, GENERIC_ALL, IntPtr.Zero);
-            if (desktop == IntPtr.Zero)
-                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "CreateDesktop " + name);
-            return desktop;
-        }
-
-        /// Starts the program, on `desktop` when one is named; its process handle comes back.
-        public static IntPtr Start(string exe, string arguments, string desktop, out int pid)
+        /// Starts the program without asking to be activated; its process handle comes back.
+        public static IntPtr Start(string exe, string arguments, out int pid)
         {
             var startup = new STARTUPINFO();
             startup.cb = Marshal.SizeOf(typeof(STARTUPINFO));
-            startup.lpDesktop = desktop;
             startup.dwFlags = (int)STARTF_USESHOWWINDOW;
             startup.wShowWindow = SW_SHOWNOACTIVATE;
             var command = "\"" + exe + "\"" + (arguments.Length == 0 ? "" : " " + arguments);
@@ -197,36 +192,58 @@ namespace Quiet
             return information.hProcess;
         }
 
-        /// The program's windows on `desktop`, the user's own when IntPtr.Zero.
-        public static IntPtr[] Windows(IntPtr desktop, int process)
-        {
-            var found = new List<IntPtr>();
-            EnumProc callback = (hwnd, data) =>
-            {
-                uint pid;
-                GetWindowThreadProcessId(hwnd, out pid);
-                if (pid == (uint)process) found.Add(hwnd);
-                return true;
-            };
-            if (desktop == IntPtr.Zero) EnumWindows(callback, IntPtr.Zero);
-            else EnumDesktopWindows(desktop, callback, IntPtr.Zero);
-            return found.ToArray();
-        }
-
         /// The program's largest visible window, or IntPtr.Zero.
-        public static IntPtr Main(IntPtr desktop, int process)
+        public static IntPtr Main(int process)
         {
             IntPtr best = IntPtr.Zero;
             long area = -1;
-            foreach (var hwnd in Windows(desktop, process))
+            EnumWindows((hwnd, data) =>
             {
-                if (!IsWindowVisible(hwnd)) continue;
+                uint owner;
+                GetWindowThreadProcessId(hwnd, out owner);
+                if (owner != (uint)process || !IsWindowVisible(hwnd)) return true;
                 RECT rect;
-                if (!GetWindowRect(hwnd, out rect)) continue;
+                if (!GetWindowRect(hwnd, out rect)) return true;
                 long size = (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);
                 if (size > area) { area = size; best = hwnd; }
-            }
+                return true;
+            }, IntPtr.Zero);
             return best;
+        }
+
+        /// The program's windows on the user's own desktop, visible or not.
+        public static int Count(int process)
+        {
+            int count = 0;
+            EnumWindows((hwnd, data) =>
+            {
+                uint owner;
+                GetWindowThreadProcessId(hwnd, out owner);
+                if (owner == (uint)process) count++;
+                return true;
+            }, IntPtr.Zero);
+            return count;
+        }
+
+        /// The virtual desktop a window is on, and whether that is the current one; "" when the
+        /// shell keeps no record of the window, which happens right after it appears.
+        public static string WindowDesktop(IntPtr hwnd, out int onCurrentDesktop)
+        {
+            onCurrentDesktop = -1;
+            try
+            {
+                var manager = (IVirtualDesktopManager)Activator.CreateInstance(
+                    Type.GetTypeFromCLSID(new Guid("AA509086-5CA9-4C25-8F95-589D3C07B48A")));
+                int on;
+                manager.IsWindowOnCurrentVirtualDesktop(hwnd, out on);
+                onCurrentDesktop = on;
+                Guid id;
+                return manager.GetWindowDesktopId(hwnd, out id) == 0 ? id.ToString() : "";
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         public static string Title(IntPtr hwnd)
@@ -278,11 +295,8 @@ $env:ELY_DATA_ROOT = (Resolve-Path $DataRoot).Path
 foreach ($name in $Environment.Keys) { Set-Item -Path "env:$name" -Value $Environment[$name] }
 if ($Theme) { $env:ELY_APPEARANCE = $Theme }
 if (-not $env:ELY_LOG) { $env:ELY_LOG = 'info' }
-# The log's place follows the data folder; names come from the app's own folder.
+
 $Exe = (Resolve-Path $Exe).Path
-
-function Log-File { Get-ChildItem -Path $env:ELY_DATA_ROOT -Recurse -Filter 'ely.log' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName }
-
 $Screenshot = [System.IO.Path]::GetFullPath($Screenshot)
 $Screen = if ($Screen) { [System.IO.Path]::GetFullPath($Screen) } else { $null }
 $Report = if ($Report) { [System.IO.Path]::GetFullPath($Report) } else { $null }
@@ -293,12 +307,29 @@ foreach ($file in @($Screenshot, $Screen, $Report)) {
     }
 }
 
+function Log-File { Get-ChildItem -Path $env:ELY_DATA_ROOT -Recurse -Filter 'ely.log' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName }
+
 function Foreground-Now {
     $hwnd = [Quiet.Native]::GetForegroundWindow()
     [pscustomobject]@{
         handle = ('0x{0:X}' -f $hwnd.ToInt64())
         title  = [Quiet.Native]::Title($hwnd)
         class  = [Quiet.Native]::Class($hwnd)
+    }
+}
+
+function Virtual-Desktops {
+    # The shell's own list, in display order; each id is 16 packed bytes.
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops')
+    if (-not $key) { return $null }
+    $raw = $key.GetValue('VirtualDesktopIDs')
+    if (-not $raw) { return $null }
+    $list = @()
+    for ($i = 0; $i -lt $raw.Length; $i += 16) { $list += [Guid]::new([byte[]]$raw[$i..($i + 15)]).ToString() }
+    $current = $key.GetValue('CurrentVirtualDesktop')
+    [pscustomobject]@{
+        list    = $list
+        current = if ($current) { [Guid]::new([byte[]]$current).ToString() } else { $null }
     }
 }
 
@@ -374,10 +405,10 @@ function Save-Screen([string]$path) {
     Note "launch-quiet: the user's screen at $path"
 }
 
-function Wait-Window([IntPtr]$desktop, [int]$childPid, [int]$seconds) {
+function Wait-Window([int]$childPid, [int]$seconds) {
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     while ($watch.Elapsed.TotalSeconds -lt $seconds) {
-        $hwnd = [Quiet.Native]::Main($desktop, $childPid)
+        $hwnd = [Quiet.Native]::Main($childPid)
         if ($hwnd -ne [IntPtr]::Zero) { return $hwnd }
         Start-Sleep -Milliseconds 50
     }
@@ -397,56 +428,52 @@ function Wait-FirstFrame([int]$seconds) {
     return $false
 }
 
-function Run-Quiet([string]$how) {
-    $desktop = [IntPtr]::Zero
-    $desktopName = $null
-    $process = [IntPtr]::Zero
-    $childPid = 0
-    $hwnd = [IntPtr]::Zero
-    try {
-        if ($how -eq 'desktop') {
-            $desktopName = 'GreenQuiet-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-            $desktop = [Quiet.Native]::NewDesktop($desktopName)
-            Note "launch-quiet: desktop $desktopName created"
-        }
-        $process = [Quiet.Native]::Start($Exe, $Arguments, $desktopName, [ref]$childPid)
-        Note "launch-quiet: $Exe started as $childPid ($how)"
-        $hwnd = Wait-Window $desktop $childPid $TimeoutSeconds
-        if ($how -eq 'noactivate') { [Quiet.Native]::ToBottom($hwnd) }
-        Note ("launch-quiet: window {0} '{1}' class {2}" -f ('0x{0:X}' -f $hwnd.ToInt64()), [Quiet.Native]::Title($hwnd), [Quiet.Native]::Class($hwnd))
-        if (Wait-FirstFrame $TimeoutSeconds) { Note 'launch-quiet: first frame presented' }
-        else { Note 'launch-quiet: no first-frame line in the log; the window had its time to draw' }
-        Start-Sleep -Milliseconds $SettleMs
-        $frame = Save-Frame $hwnd $Screenshot
-        Note ("launch-quiet: frame {0}x{1} by {2}, {3} colours, dominant {4}" -f $frame.width, $frame.height, $frame.taken, $frame.distinct, $frame.dominant)
-        if ($frame.blank) { Note 'launch-quiet: the frame is blank' }
-        if ($Screen) { Save-Screen $Screen }
-        $frame | Add-Member -NotePropertyName desktop -NotePropertyValue $desktopName
-        $frame | Add-Member -NotePropertyName handle -NotePropertyValue ('0x{0:X}' -f $hwnd.ToInt64())
-        $frame | Add-Member -NotePropertyName windowTitle -NotePropertyValue ([Quiet.Native]::Title($hwnd))
-        $frame | Add-Member -NotePropertyName windowsOnUserDesktop -NotePropertyValue ([Quiet.Native]::Windows([IntPtr]::Zero, $childPid).Count)
-        $frame | Add-Member -NotePropertyName pid -NotePropertyValue $childPid
-        return $frame
-    }
-    finally {
-        if ($hwnd -ne [IntPtr]::Zero) { [Quiet.Native]::AskToClose($hwnd) }
-        if ($process -ne [IntPtr]::Zero) {
-            if ([Quiet.Native]::WaitForSingleObject($process, 5000) -ne 0) { [void][Quiet.Native]::TerminateProcess($process, 1) }
-            [void][Quiet.Native]::CloseHandle($process)
-        }
-        if ($desktop -ne [IntPtr]::Zero) { [void][Quiet.Native]::CloseDesktop($desktop) }
-    }
-}
-
 $before = Foreground-Now
 Note ("launch-quiet: foreground before {0} '{1}'" -f $before.handle, $before.title)
-$mode = $Mode
+$process = [IntPtr]::Zero
+$childPid = 0
+$hwnd = [IntPtr]::Zero
 $frame = $null
 try {
-    if ($mode -eq 'auto') { $mode = 'desktop' }
-    $frame = Run-Quiet $mode
+    $process = [Quiet.Native]::Start($Exe, $Arguments, [ref]$childPid)
+    Note "launch-quiet: $Exe started as $childPid"
+    $hwnd = Wait-Window $childPid $TimeoutSeconds
+    [Quiet.Native]::ToBottom($hwnd)
+    Note ("launch-quiet: window {0} '{1}' class {2}" -f ('0x{0:X}' -f $hwnd.ToInt64()), [Quiet.Native]::Title($hwnd), [Quiet.Native]::Class($hwnd))
+    if (Wait-FirstFrame $TimeoutSeconds) { Note 'launch-quiet: first frame presented' }
+    else { Note 'launch-quiet: no first-frame line in the log; the window had its time to draw' }
+    Start-Sleep -Milliseconds $SettleMs
+    $frame = Save-Frame $hwnd $Screenshot
+    Note ("launch-quiet: frame {0}x{1} by {2}, {3} colours, dominant {4}" -f $frame.width, $frame.height, $frame.taken, $frame.distinct, $frame.dominant)
+    if ($frame.blank) { Note 'launch-quiet: the frame is blank' }
+    if ($Screen) { Save-Screen $Screen }
+    # Where the window landed, read and never moved.
+    $onCurrent = -1
+    $windowDesktop = [Quiet.Native]::WindowDesktop($hwnd, [ref]$onCurrent)
+    $desktops = Virtual-Desktops
+    $indexOf = { param($id) if ($desktops -and $id) { $desktops.list.IndexOf($id) } else { -1 } }
+    $virtualDesktop = [pscustomobject]@{
+        window           = $windowDesktop
+        windowIndex      = (& $indexOf $windowDesktop)
+        current          = if ($desktops) { $desktops.current } else { $null }
+        currentIndex     = (& $indexOf $(if ($desktops) { $desktops.current } else { $null }))
+        onCurrentDesktop = ($onCurrent -eq 1)
+        desktops         = if ($desktops) { $desktops.list } else { @() }
+    }
+    Note ("launch-quiet: virtual desktop: window on '{0}' (index {1}), current '{2}' (index {3}), onCurrent={4}" -f
+        $virtualDesktop.window, $virtualDesktop.windowIndex, $virtualDesktop.current, $virtualDesktop.currentIndex, $virtualDesktop.onCurrentDesktop)
+    $frame | Add-Member -NotePropertyName handle -NotePropertyValue ('0x{0:X}' -f $hwnd.ToInt64())
+    $frame | Add-Member -NotePropertyName windowTitle -NotePropertyValue ([Quiet.Native]::Title($hwnd))
+    $frame | Add-Member -NotePropertyName windowsOnUserDesktop -NotePropertyValue ([Quiet.Native]::Count($childPid))
+    $frame | Add-Member -NotePropertyName virtualDesktop -NotePropertyValue $virtualDesktop
+    $frame | Add-Member -NotePropertyName pid -NotePropertyValue $childPid
 }
 finally {
+    if ($hwnd -ne [IntPtr]::Zero) { [Quiet.Native]::AskToClose($hwnd) }
+    if ($process -ne [IntPtr]::Zero) {
+        if ([Quiet.Native]::WaitForSingleObject($process, 5000) -ne 0) { [void][Quiet.Native]::TerminateProcess($process, 1) }
+        [void][Quiet.Native]::CloseHandle($process)
+    }
     Start-Sleep -Milliseconds 200
     $after = Foreground-Now
     Note ("launch-quiet: foreground after  {0} '{1}'" -f $after.handle, $after.title)
@@ -456,7 +483,6 @@ $kept = ($before.handle -eq $after.handle)
 $outcome = [pscustomobject]@{
     exe              = $Exe
     arguments        = $Arguments
-    mode             = $mode
     screenshot       = $Screenshot
     screen           = $Screen
     frame            = $frame

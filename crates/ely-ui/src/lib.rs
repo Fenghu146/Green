@@ -1,4 +1,6 @@
 pub mod commands;
+#[cfg(feature = "capture")]
+pub mod capture;
 pub mod fonts;
 #[cfg(any(test, feature = "test-support"))]
 mod ending;
