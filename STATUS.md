@@ -8,6 +8,21 @@
 - `crates/ely-ui/src/{fonts,theme,opening,lib}.rs` 与 `vendor/ely-gpui-components/**` 共写：ely-ui 的字体与主题由导出线先落，S2a 的视图改动后合；vendor 一律经 `patches/` 改。
 - 主线最后合；动 `Cargo.lock` 的人负责 `cargo deny` 与 notices 同步；合并验收 = `git diff origin/main` 为空 + `cargo test --workspace --no-fail-fast` 全绿。
 
+## 工作规矩
+
+- **合并即删 worktree，不做归档。** 分支进 main 后立刻 `git worktree remove`（不加 `--force`）；它报不干净就停下查清，别强删。删的是工作区，分支本身留在远端。
+- **`D:\cargo-target\<线>` 谁建谁删，一条线收工就删自己的 target 目录。** worktree 分支合入 main 后立刻删，不做归档；删不掉先查占用，不用 `--force`。
+- **`D:\cargo-target` 下的 `debug` / `release` / `release-fast` 是无主池。** 机器级 `CARGO_TARGET_DIR` 保留，它拦住"仓库里长出 `target\`"那类事故；代价是没设 per-line target dir 的构建全落进这三个扁平目录，所以只要没有构建在跑就整个删掉。判定"在跑"以 `<profile>\.cargo-lock` 能否独占打开为准（cargo 把它建在 profile 目录里，不在 target 根），再叠加无 `cargo`/`rustc` 进程、15 分钟无写入。每条线仍然必须显式设 `CARGO_TARGET_DIR=D:\cargo-target\<line>`，不设就是占着无主池。
+- 回收磁盘用 `scripts/disk-prune`（dry run 先看判决），删除前脚本会重探一次锁。
+- **已知债：磁盘阈值散在三处**（`.github/workflows/ci.yml` 的 runner 数字、`scripts/disk.sh` 的 30/50、`scripts/disk-prune` 的判定逻辑），迟早会分叉。应收口到一处：阈值只写在 `disk.sh`，CI 只调用它，`disk-prune` 只读它的默认值。
+- **已定：CI 装 Typst 0.15.1。** test job 下载 v0.15.1 的 Windows 二进制（缓存 key 带版本号），解压后把路径写进 `GREEN_TYPST`；`crates/green-math/src/tests.rs` 的 `every_covered_sample_compiles_in_typst` 与 `crates/green-export/tests/export.rs` 的端到端测试因此真正执行。下载失败、找不到 `typst.exe` 或版本不符就让 job 红，不静默退化成跳过——真编译测试是挡住非法 Typst 的唯一防线，静默跳过等于没有这个测试。
+- **事实集中到一处：`ci.yml` 只描述行为。** 不在注释里写「目前还没有 / as of ...」这类会过期的状态；当前状态、已查明原因与待决项都写在 `STATUS.md`。
+- **CI 的 `cancel-in-progress` 会吞掉中间提交的信号。** `concurrency` 按 ref 分组并取消进行中的 run；频繁推 main 时，被取消的中间提交永远拿不到完整绿。发版前要一次「完整绿」，以最后那个 HEAD 的完整 run 为准，别拿被取消的 run 说事。
+
+## 已查明的 CI 红（别再归错因）
+
+- run `45808353158`（head `ffe922d`）的 `test` job 红**不是 `skips.sh` 假红**：第 6 步 `cargo test --workspace` 退出 101，`-p green-plugins --test process` 的 `the_shipped_log_plugin_speaks_the_same_contract_from_node` 在 `crates/green-plugins/tests/process.rs:154` 对 `Option<&[Block]>` 的 `.expect("blocks")` panic（该二进制 14 passed / 1 failed）；第 7 步 `scripts/skips.sh` 是 success，日志里没有 `SKIP:` 或 `GREEN_TYPST`。真因是插件测试失败，由另一条线修。
+- 历史记录：2026-11-26 的 main 上 `test-app` job（`cargo test -p green`）因两处测试代码错误红——`apps/green/src/output/tests.rs` 调用了不是 green dev-dependency 的 `ely_pdf_engine`，`apps/green/src/desk/tests.rs` 调用了不存在的 `Desk::tree_failed`；当时 S2 工作树已有修复。该 job 故意保持启用，关掉它只会让同类破坏无人发现。这只记当时的原因，当前状态以 CI 结果为准。
 ## 已知债
 
 ### 还叫 ely-mark / ElyMark 的地方

@@ -42,7 +42,7 @@ scripts/extract-official-lo.sh 用 7zz 把官方镜像的 Frameworks 与 Resourc
 scripts/check.sh [根]            规则检查：入库代码文件不超 500 行（vendor、reference、patches 除外）、agents.md 不超 30000 字节、注释（comments.py）、测试的等待（waits.py）、横幅只有 `doc-fonts`（banners.py）、行尾（eol.sh）；JS、TS、TSX 与 HTML 的注释经 `tests/scripts/comments.mjs` 由官网的 TypeScript、parse5 解析，先在 `site/` 跑 `pnpm install`
 cd site && pnpm run deploy    官网构建并经 wrangler 发到 Cloudflare Workers：另有 `site/worker` 答 `/release.json`（最新版本、安装包地址与下载总数，缓存 5 分钟）并转发 `/releases/` 下的发布文件；地址 https://office.elygpui.com（workers.dev 上同站）
 scripts/deny.sh [根] [检查...]  cargo-deny：安全公告、yanked、许可与来源；重复版本只许 deny.toml 里列着的组，组消失而 skip 还在即败
-scripts/disk.sh [下限] [目录]  磁盘余量闸门：低于下限（默认 4G，可写 800M）即失败，并列出该目录下一层最大的十个子目录；余量每跑都打印，CI 的 disk job 用它（runner 的 workspace 也在 D:）
+scripts/disk.sh [硬线] [目标线] [目录]  磁盘余量闸门：低于目标线（默认 50G）只 WARN，低于硬线（默认 30G）才失败，并列出该目录下一层最大的十个子目录；余量每跑都打印。451 GB 的盘上我们只用 133 GB，其余 298 GB 是别的项目，30–50 GB 是多线各自热 target 的可持续水位。CI 的 disk job 传的是 runner 自己的小数字。
 scripts/notices.sh [根]          cargo-about 按 about.toml 与 about.hbs 重写 THIRD-PARTY-NOTICES.txt（去掉 CRLF，各平台字节一致）；ci.yml 重跑后 `git diff --exit-code` 核对
 scripts/vendor-gpui.sh [check|write]  vendor 的四个 gpui crate = crates.io 该版本 + patches/gpui 按序应用；check 重放后与 vendor/ 逐文件比对，版本从 Cargo.toml 读，hash 不符即说版本变了；补丁缺失、baseline 行与 pin 不一致也即败
 scripts/vendor-components.sh [check|write]  vendor/ely-gpui-components = Cargo.toml 的 pin，按 patches/ely-gpui-components/fc71e96-prune.txt 裁掉它自己仓库的路径，再按序应用该目录的补丁；check 同上逐文件比对
