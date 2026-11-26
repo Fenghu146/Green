@@ -308,4 +308,27 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(desk.read_with(cx, |desk, _| desk.core.tabs.len()), 1, "one page tab");
     }
+
+    #[gpui::test]
+    fn a_page_takes_no_save(cx: &mut gpui::TestAppContext) {
+        let data = tempfile::tempdir().unwrap();
+        let (desk, cx) = crate::desk::tests::start(cx, data.path());
+        // A new document asks where it should go...
+        cx.dispatch_action(ely_ui::commands::New);
+        cx.run_until_parked();
+        cx.dispatch_action(ely_ui::commands::Save);
+        cx.run_until_parked();
+        assert!(cx.did_prompt_for_new_path(), "a document asks where to save");
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+        // ...a page does not.
+        cx.dispatch_action(crate::keys::OpenLicenses);
+        cx.run_until_parked();
+        cx.dispatch_action(ely_ui::commands::Save);
+        cx.run_until_parked();
+        assert!(!cx.did_prompt_for_new_path(), "a page is not a document");
+        assert!(desk.read_with(cx, |desk, cx| {
+            desk.core.tabs.last().expect("the page").extra.special
+        }));
+    }
 }
