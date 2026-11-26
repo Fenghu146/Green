@@ -1,40 +1,61 @@
 #!/usr/bin/env bash
-# Fails when the disk under a path is too full, and says what is eating it.
+# Two lines on the disk under a path: a target to warn below, a hard floor to fail below.
+#
+#   scripts/disk.sh [hard_floor] [target] [root]      defaults: 30G 50G <repo>
+#
+# This drive is 451 GB. Our own footprint is 133 GB; the other 298 GB belongs to
+# other projects and is not ours to delete. Multi-line work keeps a hot target dir
+# per line (D:\cargo-target\<line>), and several of those building at once settle
+# between 30 and 50 GB free. That 30-50 GB is the sustainable water level on this
+# machine, not 100 GB: reaching 100 GB would mean deleting other people's data.
+# So the defaults fail below 30 GB and only WARN below 50 GB. CI passes smaller
+# numbers because a runner's disk is not this machine's disk.
 set -euo pipefail
 
-threshold=${1:-4G}
-root=${2:-$(cd "$(dirname "$0")/.." && pwd)}
+hard=${1:-30G}
+target=${2:-50G}
+root=${3:-$(cd "$(dirname "$0")/.." && pwd)}
 [ -d "$root" ] || {
   echo "disk: no directory at $root" >&2
   exit 2
 }
 root=$(cd "$root" && pwd)
 
-size=${threshold%[GgMmKk]}
-case $size in
-  '' | *[!0-9]*)
-    echo "disk: threshold is a size like 4G or 800M, not $threshold" >&2
-    exit 2
-    ;;
-esac
-case $threshold in
-  *[Gg]) floor_kb=$((size * 1024 * 1024)) ;;
-  *[Mm]) floor_kb=$((size * 1024)) ;;
-  *[Kk]) floor_kb=$size ;;
-  *) floor_kb=$((size * 1024 * 1024)) ;;
-esac
+kb_of() {
+  local size=${1%[GgMmKk]}
+  case $size in
+    '' | *[!0-9]*)
+      echo "disk: $1 is not a size like 30G or 800M" >&2
+      return 1
+      ;;
+  esac
+  case $1 in
+    *[Gg]) echo $((size * 1024 * 1024)) ;;
+    *[Mm]) echo $((size * 1024)) ;;
+    *[Kk]) echo "$size" ;;
+    *) echo $((size * 1024 * 1024)) ;;
+  esac
+}
 
+hard_kb=$(kb_of "$hard") || exit 2
+target_kb=$(kb_of "$target") || exit 2
 free_kb=$(df -Pk "$root" | awk 'NR == 2 { print $4 }')
 [ -n "$free_kb" ] || {
   echo "disk: df gave no free space for $root" >&2
   exit 2
 }
-free_mb=$((free_kb / 1024))
-line="disk: $free_mb MB free under $root, floor $threshold"
+
+free_gb=$(awk -v k="$free_kb" 'BEGIN { printf "%.1f", k / 1048576 }')
+line="disk: ${free_gb} GB free under $root; warn below $target, fail below $hard"
 echo "$line"
 [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "$line" >>"$GITHUB_STEP_SUMMARY"
 
-[ "$free_kb" -lt "$floor_kb" ] || exit 0
+if [ "$free_kb" -lt "$target_kb" ]; then
+  warn="disk: below the $target target ($free_gb GB free): collect build output soon, scripts/disk-prune says what can go"
+  echo "$warn" >&2
+  [ -z "${GITHUB_ACTIONS:-}" ] || echo "::warning::$warn"
+fi
+[ "$free_kb" -lt "$hard_kb" ] || exit 0
 
 # The ten largest directories one level down: the point is to name the hog.
 listing=$(du -sm "$root"/*/ 2>/dev/null | sort -nr | head -10 | while IFS=$'\t' read -r mb dir; do
@@ -51,5 +72,5 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   } >>"$GITHUB_STEP_SUMMARY"
 fi
 
-echo "disk: under the $threshold floor; free space or build elsewhere" >&2
+echo "disk: under the $hard floor; free space or build elsewhere (scripts/disk-prune lists what can go)" >&2
 exit 1

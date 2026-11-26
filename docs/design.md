@@ -137,11 +137,11 @@ OFL 不在原白名单（MIT/Apache/BSD/ISC/Zlib/Unicode/CC0）里，是用户�
 ```
 %APPDATA%\Green\plugins\<id>\  manifest.json + 任意脚本
 { "id": "csv", "version": "0.1.0", "apiVersion": 1, "extensions": [".csv"],
-  "command": ["python", "csv_plugin.py"], "timeoutMs": 3000, "enabled": true }
+  "command": ["python", "csv_plugin.py"], "timeoutMs": 8000, "enabled": true }
 ```
 
 stdin 收 `{apiVersion, path, ext, content(base64), contentOmitted, capabilities}`，stdout 回 `{apiVersion, blocks[], meta}`。`content` 上限 8 MB；超过时 `content` 为 `null`、`contentOmitted` 为 `true`，插件按 `path` 自读。失败/超时/坏清单 → 降级 plaintext + 状态栏，不影响启动。
-兼容：`apiVersion` 整数、超范围拒绝；`capabilities` 协商（清单省略 = `["blocks@1"]`）；两侧忽略未知字段、新增字段可选有默认值；破坏性变更 `apiVersion += 1`，旧版留 2 个小版本；`timeoutMs` 50–30000、默认 3000，覆盖进程启动到退出。
+兼容：`apiVersion` 整数、超范围拒绝；`capabilities` 协商（清单省略 = `["blocks@1"]`）；两侧忽略未知字段、新增字段可选有默认值；破坏性变更 `apiVersion += 1`，旧版留 2 个小版本；`timeoutMs` 50–30000、默认 8000，覆盖进程启动到退出；首次与后续打开同值，超时提示单独说明毫秒数与 `timeoutMs` 可调。
 缓存：按 (path, mtime, size, 插件 version, `command` 指到的文件指纹) 缓存；打开文件时比对指纹，脚本或清单变了就重读清单并清掉该插件的缓存（热更新，不重启 Green）。
 
 **v1 Block 契约**（外部作者唯一接触的接口；core 的 Block 模型向它对齐，不改契约）：

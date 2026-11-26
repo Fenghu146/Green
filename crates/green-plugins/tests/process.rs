@@ -135,6 +135,7 @@ fn the_shipped_log_plugin_speaks_the_same_contract_from_node() {
     let folder = root.path().join("log");
     std::fs::create_dir_all(&folder).expect("a folder");
     std::fs::copy(source.join("log_plugin.js"), folder.join("run.js")).expect("the script");
+    // windows-latest took 3.59 s once; the 8 s default now covers that cold start.
     std::fs::write(
         folder.join("manifest.json"),
         format!(
@@ -150,8 +151,11 @@ fn the_shipped_log_plugin_speaks_the_same_contract_from_node() {
     std::fs::copy(source.join("sample.log"), &log).expect("a log");
 
     let view = host.open(&log);
+    let blocks = view
+        .blocks()
+        .unwrap_or_else(|| panic!("no blocks: {view:?}"));
     assert_eq!(
-        view.blocks().expect("blocks"),
+        blocks,
         [
             Block::Alert {
                 level: AlertLevel::Warning,

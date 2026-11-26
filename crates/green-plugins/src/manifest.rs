@@ -17,8 +17,8 @@ pub const API_VERSION: u32 = 1;
 /// The one capability this build offers; a plugin must declare it.
 pub const BLOCKS: &str = "blocks@1";
 
-/// `timeoutMs` when a manifest leaves it out.
-pub const DEFAULT_TIMEOUT_MS: u64 = 3_000;
+/// `timeoutMs` when a manifest leaves it out; a cold start can take seconds.
+pub const DEFAULT_TIMEOUT_MS: u64 = 8_000;
 
 /// The timeouts a manifest may ask for; a run includes the process's start.
 const TIMEOUTS: std::ops::RangeInclusive<u64> = 50..=30_000;
@@ -400,6 +400,7 @@ mod tests {
         }"#;
         let manifest = parsed(json).expect("a manifest");
         assert_eq!(manifest.extensions, [".log"]);
+        assert_eq!(manifest.timeout_ms, 8_000);
         assert_eq!(manifest.timeout_ms, DEFAULT_TIMEOUT_MS);
         assert!(manifest.enabled);
         assert_eq!(manifest.capabilities, [BLOCKS]);

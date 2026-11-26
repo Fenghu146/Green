@@ -40,6 +40,10 @@ pub(super) const DE: &[(&str, &str)] = &[
     ("office.error.engine", "{error}"),
     ("office.error.format", "Speichern unter schreibt .{formats}"),
     ("office.error.open", "{name} wurde nicht geöffnet: {error}"),
+    (
+        "office.error.plugin_timeout",
+        "{name} wurde nicht geöffnet: Das Plugin brauchte länger als {ms} ms. Erhöhe timeoutMs in seinem Manifest.",
+    ),
     ("office.error.not_package", "es ist keine echte .{ext}-Datei; ihr Inhalt hat ein anderes Format, etwa reinen Text"),
     ("office.error.damaged", "die Datei ist beschädigt; holen Sie eine neue Kopie beim Absender oder speichern Sie sie erneut in dem Programm, das sie erstellt hat"),
     ("office.error.password_unkept", "dieses Kennwort enthält Zeichenfolgen, mit denen Ely nicht speichern kann (etwa „,Password=“); ändern Sie das Kennwort in dem Programm, das es gesetzt hat, und öffnen Sie die Datei erneut"),

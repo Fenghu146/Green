@@ -86,6 +86,10 @@ pub(super) const ES: &[(&str, &str)] = &[
     ),
     ("office.error.open", "No se pudo abrir {name}: {error}"),
     (
+        "office.error.plugin_timeout",
+        "No se pudo abrir {name}: el complemento agotó el tiempo de espera ({ms} ms). Aumenta timeoutMs en su manifiesto.",
+    ),
+    (
         "office.error.not_package",
         "no es un archivo .{ext} válido; su contenido tiene otro formato, como texto sin formato",
     ),

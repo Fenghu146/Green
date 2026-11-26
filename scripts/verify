@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# One page: what works right now. Fast by default; --slow adds the machine-heavy
+# checks and says how long they take.
+#
+#   scripts/verify            the fast layer, a few minutes on a warm target
+#   scripts/verify --slow     the slow layer alone
+#   scripts/verify --all      both
+set -uo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+logs=$root/target/verify
+mkdir -p "$logs"
+
+mode=
+update=0
+for arg in "$@"; do
+  case $arg in
+    --slow | --all) mode=$arg ;;
+    --update) update=1 ;;
+    *)
+      echo "usage: verify [--slow|--all] [--update]" >&2
+      exit 2
+      ;;
+  esac
+done
+[ -n "$mode" ] || mode=
+
+rows=""
+failed=0
+blocked=0
+start=$(date +%s)
+
+row() { # state name detail next
+  rows+="$1|$2|$3|${4:-}"$'\n'
+  case $1 in FAIL) failed=$((failed + 1)) ;; BLOCKED) blocked=$((blocked + 1)) ;; esac
+}
+
+# Cores and how busy the machine has been since boot, as the benchmarks report it.
+machine() {
+  if command -v powershell >/dev/null 2>&1; then
+    powershell -NoProfile -Command '
+      Add-Type -Namespace V -Name K -MemberDefinition @"
+        [DllImport(\"kernel32.dll\")] public static extern bool GetSystemTimes(out long i, out long k, out long u);
+"@
+      $i=0;$k=0;$u=0; [void][V.K]::GetSystemTimes([ref]$i,[ref]$k,[ref]$u)
+      $total=$k+$u
+      if ($total -gt 0) { "{0} cores, busy {1:N0}%" -f [Environment]::ProcessorCount, (100.0*(1-$i/$total)) }
+      else { "{0} cores" -f [Environment]::ProcessorCount }' 2>/dev/null | tr -d '\r'
+  else
+    echo "$(nproc 2>/dev/null || echo 1) cores, load $(cut -d" " -f1 /proc/loadavg 2>/dev/null || echo "?")"
+  fi
+}
+
+sha_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d" " -f1
+  else
+    shasum -a 256 "$1" | cut -d" " -f1
+  fi
+}
+
+passed_tests() { grep -h 'test result:' "$1" | awk -F'[ ;]' '{ p += $4 } END { print p + 0 }'; }
+now() { date +%s; }
+
+# ---- fast layer -----------------------------------------------------------
+
+fast() {
+  local t0
+
+  t0=$(now)
+  if cargo build -p green --locked >"$logs/build.log" 2>&1; then
+    row PASS build "green debug, $(( $(now) - t0 )) s"
+  else
+    row FAIL build "cargo build -p green" "see $logs/build.log"
+  fi
+
+  t0=$(now)
+  if cargo test -p ely-lok --locked >"$logs/tests-lok.log" 2>&1 &&
+    cargo test --workspace --exclude ely-lok --exclude ely-pdf-worker --exclude green --locked >"$logs/tests.log" 2>&1 &&
+    cargo test -p green --locked >"$logs/tests-green.log" 2>&1; then
+    local n
+    n=$(( $(passed_tests "$logs/tests-lok.log") + $(passed_tests "$logs/tests.log") + $(passed_tests "$logs/tests-green.log") ))
+    row PASS tests "$n tests, $(( $(now) - t0 )) s"
+  else
+    local which=$(for f in tests-lok tests tests-green; do
+      grep -q 'test result: FAILED\|error\[\|error:' "$logs/$f.log" 2>/dev/null && echo "$f "
+    done)
+    row FAIL tests "failing: ${which:-see logs}" "see $logs/{tests-lok,tests,tests-green}.log"
+  fi
+
+  t0=$(now)
+  if ! command -v cargo-deny >/dev/null 2>&1; then
+    row FAIL licences "cargo-deny is not installed" "cargo install cargo-deny --locked (0.22.1); see deny.toml"
+  elif cargo deny check -D unnecessary-skip -D unmatched-skip >"$logs/deny.log" 2>&1; then
+    row PASS licences "cargo deny: $(sed -n 's/^.*\(advisories ok\).*/\1/p' "$logs/deny.log" | head -1), $(( $(now) - t0 )) s"
+  else
+    row FAIL licences "cargo deny check" "see $logs/deny.log; scripts/deny.sh"
+  fi
+
+  t0=$(now)
+  if [ -z "${GREEN_TYPST:-}" ]; then
+    row FAIL export "GREEN_TYPST is unset" "point GREEN_TYPST at the typst CLI (v$(sed -n 's/^typst = { version = "\([0-9.]*\)".*/\1/p' Cargo.toml)); CI installs it in the test job"
+  elif cargo test -p green-export --test export --locked -- --nocapture >"$logs/export.log" 2>&1; then
+    row PASS export "$(grep -h '^export:' "$logs/export.log" | tail -1 | cut -c8-), $(( $(now) - t0 )) s"
+  else
+    row FAIL export "green-export tests/export.rs" "see $logs/export.log; the caps are design §7"
+  fi
+
+  # The 30/50 GB defaults are this machine's water level; don't pass the old
+  # 4G floor here, which would now be read as a hard floor with a bad target.
+  if out=$(scripts/disk.sh 2>&1); then
+    row PASS disk "$(printf '%s\n' "$out" | head -1 | cut -c7-)"
+  else
+    row FAIL disk "$(printf '%s\n' "$out" | head -1 | cut -c7-)" "scripts/disk.sh; free space or build elsewhere"
+  fi
+}
+
+# ---- slow layer -----------------------------------------------------------
+
+slow() {
+  local t0
+
+  t0=$(now)
+  if cargo build -p green --features capture --locked >"$logs/capture-build.log" 2>&1; then
+    mkdir -p "$logs/captures"
+    local baseline=fixtures/captures/baseline.tsv
+    local drift="" made=0 fresh=""
+    for doc in fixtures/perf/50k-paragraphs.md fixtures/real/short-reading-notes.md; do
+      for theme in light dark; do
+        local out=$logs/captures/$(basename "$doc" .md)-$theme.png
+        if ! target/debug/green --capture "$out" --theme "$theme" --width 1000 --height 700 "$doc" >"$logs/capture.log" 2>&1; then
+          drift+="$(basename "$doc") $theme: capture failed; "
+          continue
+        fi
+        made=$((made + 1))
+        local sum
+        sum=$(sha_of "$out")
+        fresh+="$(basename "$doc")	$theme	$sum"$'\n'
+        local want
+        want=$(awk -v d="$(basename "$doc")" -v t="$theme" '$1 == d && $2 == t { print $3 }' "$baseline" 2>/dev/null)
+        if [ -z "$want" ]; then
+          drift+="$(basename "$doc") $theme: no baseline; "
+        elif [ "$sum" != "$want" ]; then
+          drift+="$(basename "$doc") $theme: pixels moved; "
+        fi
+      done
+    done
+    if [ "$update" = 1 ]; then
+      mkdir -p fixtures/captures
+      printf '%s' "$fresh" >"$baseline"
+      row PASS captures "baseline written: $made captures in $baseline"
+    elif [ -z "$drift" ]; then
+      row PASS captures "$made captures match $baseline, $(( $(now) - t0 )) s"
+    else
+      row FAIL captures "$drift" "see $logs/captures/*.png; after a deliberate change run: scripts/verify --slow --update"
+    fi
+  else
+    row FAIL captures "cargo build --features capture" "see $logs/capture-build.log"
+  fi
+
+  t0=$(now)
+  if cargo test --release -p green --features shape-count --locked -- --ignored --nocapture >"$logs/bench.log" 2>&1; then
+    row PASS bench "$(grep -h '^folding:\|^outline:' "$logs/bench.log" | tr '\n' ' '), $(( $(now) - t0 )) s"
+  else
+    row FAIL bench "release benchmarks" "see $logs/bench.log; design §5.4 — every toggle must shape nothing"
+  fi
+
+  row BLOCKED export-12 "no headless Markdown export: green-export takes Blocks, the parser lives in apps/green" "a CLI (green --export out.pdf in.md) would unblock the 12-document sweep"
+}
+
+# ---- the page -------------------------------------------------------------
+
+if [ "$mode" != "--slow" ]; then fast; fi
+if [ "$mode" = "--slow" ] || [ "$mode" = "--all" ]; then slow; fi
+
+total=$(( $(now) - start ))
+printf 'verify: %s  mode %s  total %s s  machine %s\n' \
+  "$(printf '%s' "$rows" | grep -c .) checks, $failed failed, $blocked blocked" \
+  "${mode:-fast}" "$total" "$(machine)"
+printf 'logs: %s\n\n' "$logs"
+printf '%s' "$rows" | while IFS='|' read -r state name detail next; do
+  [ -n "$state" ] || continue
+  printf '%-7s %-12s %s\n' "$state" "$name" "$detail"
+  [ -z "$next" ] || printf '        %-12s next: %s\n' "" "$next"
+done
+[ "$failed" -eq 0 ]

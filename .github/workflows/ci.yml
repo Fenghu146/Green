@@ -32,8 +32,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      # The machine's own water level is 30/50 GB; a runner starts with far less
+      # disk in absolute terms, so the runner only fails when the checkout cannot build.
       - shell: bash
-        run: scripts/disk.sh 4G .
+        run: scripts/disk.sh 4G 8G .
 
   build:
     name: build
@@ -65,11 +67,43 @@ jobs:
       # scripts/build-mupdf.sh produces; no runner has that build, and no other
       # package depends on it, so it is excluded rather than skipped silently.
       #
-      # When green-math's conversion gets its real-typst test (the one that reads
-      # GREEN_TYPST and compiles the output), install the Typst CLI at the typst
-      # version in Cargo.toml here and export GREEN_TYPST — the skips step below
-      # fails the job until then, on purpose. As of 2026-11-26 no test reads
-      # GREEN_TYPST, so there is nothing to wire yet.
+      # green-math's real-Typst test and green-export's end-to-end test are the
+      # only gates against converter output Typst rejects. Pin the CLI: a
+      # self-updating test dependency would move the gate with time.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/typst-cache
+          key: typst-0.15.1-${{ runner.os }}-${{ runner.arch }}
+      - name: Install Typst 0.15.1
+        shell: bash
+        env:
+          TYPST_VERSION: 0.15.1
+          TYPST_ASSET: typst-x86_64-pc-windows-msvc.zip
+          TYPST_CACHE: ${{ runner.temp }}/typst-cache
+          TYPST_DEST: ${{ runner.temp }}/typst-unpack
+        run: |
+          set -euo pipefail
+          cache=$(cygpath -u "$TYPST_CACHE")
+          dest=$(cygpath -u "$TYPST_DEST")
+          mkdir -p "$cache"
+          zip="$cache/$TYPST_ASSET"
+          if [ ! -f "$zip" ]; then
+            curl -fL --retry 3 --connect-timeout 15 \
+              "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${TYPST_ASSET}" \
+              -o "$zip"
+          fi
+          rm -rf "$dest"
+          mkdir -p "$dest"
+          unzip -q "$zip" -d "$dest"
+          exe=$(find "$dest" -type f -name 'typst.exe' -print -quit)
+          [ -n "$exe" ] || { echo "typst: no typst.exe in $TYPST_ASSET" >&2; exit 1; }
+          version=$("$exe" --version)
+          case $version in
+            *"$TYPST_VERSION"*) ;;
+            *) echo "typst: expected $TYPST_VERSION, got $version" >&2; exit 1 ;;
+          esac
+          echo "GREEN_TYPST=$(cygpath -w "$exe")" >>"$GITHUB_ENV"
+          echo "typst: $version" >>"$GITHUB_STEP_SUMMARY"
       - shell: bash
         run: |
           set -o pipefail
@@ -79,6 +113,14 @@ jobs:
       - if: always()
         shell: bash
         run: scripts/skips.sh tests.log
+      # The gate is the exit code: a log with only #[ignore]d tests must be
+      # green, a SKIP: line must be red. Re-run both cases on every build so
+      # that contract stays explicit. Run 45808353158 was red for a different
+      # reason: cargo test exited 101 on the Node plugin test (process.rs:154);
+      # this step succeeded. See STATUS.md.
+      - name: skips.sh self-test
+        shell: bash
+        run: scripts/skips-self-test.sh
 
   test-app:
     name: test green
@@ -90,12 +132,8 @@ jobs:
         with:
           cache-on-failure: true
       - run: rustup show active-toolchain
-      # Red on main as of 2026-11-26, for two errors in test code that the S2
-      # working tree already fixes: apps/green/src/output/tests.rs calls
-      # ely_pdf_engine (not a dev-dependency of green), and
-      # apps/green/src/desk/tests.rs calls Desk::tree_failed (no such method).
-      # Kept enabled on purpose: turning it off is how that breakage would go
-      # unnoticed. It goes green when S2 lands.
+      # This job runs the app's own tests and the skips gate. It stays enabled
+      # on purpose: disabling it is how a real breakage would go unnoticed.
       - shell: bash
         run: |
           set -o pipefail

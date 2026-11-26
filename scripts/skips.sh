@@ -36,8 +36,15 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   } >>"$GITHUB_STEP_SUMMARY"
 fi
 
-# The conversion test only proves anything when it compiles what it converts.
+# A `SKIP:` line is a hole, not a decision: `#[ignore]` is the decision.
+# Exit explicitly on every path: a trailing grep's status must never decide
+# whether the job is green (bash -e -o pipefail runs this script from CI).
 if printf '%s\n' "$skipped" | grep -q 'GREEN_TYPST'; then
   echo "skips: a test skipped for GREEN_TYPST; install typst at Cargo.toml's version and export the path instead" >&2
   exit 1
 fi
+if [ -n "$skipped" ]; then
+  echo "skips: $(printf '%s\n' "$skipped" | grep -c .) skipped test(s) are holes; see the list above" >&2
+  exit 1
+fi
+exit 0
