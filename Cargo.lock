@@ -3988,6 +3988,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "typst",
  "unicode-segmentation",
 ]
 

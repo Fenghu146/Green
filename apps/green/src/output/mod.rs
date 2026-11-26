@@ -7,7 +7,7 @@ mod pdf;
 mod pictures;
 mod plain;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::{io, path::Path};
 

@@ -10,6 +10,13 @@
 
 ## 已知债
 
+### S2b 阶段二：大纲标题里的公式还没接回
+
+合并 `origin/main` 时大纲采用了 main 的折叠树（`Outline::item` + `on_fold`），
+分支里旧的「标题里的行内公式画成图」接线（`Outline::drawn`）随之替换。现在含公式的标题显示源码；
+转换器和 Typst 进程内渲染器都还在，第二阶段在 main 的树上重新接 `documents::inline_math` 即可。
+块级 `$$…$$` 渲染不依赖这一项，已完成。
+
 ### 还叫 ely-mark / ElyMark 的地方
 
 产品名与二进制已经是 Green：`AppId::Mark` 的 `name()` 是 `Green`、`slug()` 是 `green`、bundle id 是

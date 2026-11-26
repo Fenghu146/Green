@@ -25,12 +25,20 @@ pub(crate) const PREAMBLE: &str = "\
 
 ";
 
+/// The box's frame is a style, not a converter decision: its one definition
+/// comes from `green-math`, the same function the editor's preamble calls.
+pub(crate) const GBOX_STROKE: &str = "#8a8a8a";
+
+pub(crate) fn preamble() -> String {
+    format!("{PREAMBLE}{}\n\n", green_math::gbox_rule(GBOX_STROKE))
+}
+
 /// `blocks` as one Typst document, and every formula kept as its TeX because
 /// the converter refused it (§7.8: one formula must not take the document down).
 pub fn source(blocks: &[Block]) -> Result<(String, Vec<(String, String)>)> {
     let mut kept = Vec::new();
     let blocks = settled(blocks, &mut kept);
-    let mut out = String::from(PREAMBLE);
+    let mut out = preamble();
     blocks_into(&mut out, &blocks, "")?;
     let mut notes = Vec::new();
     collect_notes(&blocks, &mut notes);
