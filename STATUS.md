@@ -1,5 +1,11 @@
 # STATUS
 
+## 下一步第一件事
+
+1. **S2b-2：行内公式**。目标是 `通项 $a_n=(2/5)^{n-1}$，是等比级数` 这种中文与公式混排，绝不降级为源码。设计在 `docs/design.md` §6：§6.1 的 glue-overlay（NBSP 预留宽度 → GPUI 自己断行 → 公式图盖上去 → `Frame::baseline()` 抬行高 → `swaps` 把点击映射回原文），§6.5 记着正文行内已落地，§6.4 是不可行时的退化顺序。实测清单在 `D:\Amp\notes\typst-as-library.md` §7：§7.1 字体/许可证、§7.2 依赖、§7.4 渲染模块（编译时用 `#box[$…$]` 保住 baseline，见该笔记 §3.1）、§7.5 行内接线、§7.6 大纲接线；大纲标题里的公式还没接回，见下面「已知债」。
+2. **Typst 库集成（发布阻断项）**。导出仍依赖外部 `typst.exe`（`GREEN_TYPST` 或 PATH，见 `crates/green-export/src/compile.rs`、`apps/green/src/output/pdf.rs`）；编辑器与 preflight 已经进程内 `typst::compile`。下一步把导出也换成进程内编译 + `typst-pdf`，去掉外部 CLI 依赖——不做完就无法给朋友「解压即用」。按笔记 §7.2 / §7.7 验收：`cargo tree -i typst-library` 只有一份 0.15.1，导出测试不再因 `GREEN_TYPST` 未设而跳过。
+3. 动手前读本文件的「已知债」与其中的「真实笔记夹具：能过才进 CI，其余进已知债」两节：**降级不是通过**，CI 正样本白名单目前只有三份；`cancel-in-progress` 会吞掉中间提交信号，验收只认最后 HEAD 的完整绿。
+
 下次合并还会撞的地方（文件级归属）：
 
 - `crates/ely-platform/tests/packaging.rs`、`packaging/apps.tsv`、`deny.toml`、`THIRD-PARTY-NOTICES.txt`、`scripts/notices*.sh` 归工具链：整份取它的版本，别的线只提需求，不手改许可证与通知。
