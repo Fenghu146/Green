@@ -13,6 +13,7 @@ green-math = { path = "../green-math" }
 log.workspace = true
 lopdf.workspace = true
 sha2.workspace = true
+ttf-parser = "0.25"
 
 [lints]
 workspace = true

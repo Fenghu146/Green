@@ -81,6 +81,57 @@ fn marks_the_bundled_fonts_lack_become_symbols() {
 }
 
 #[test]
+fn coverage_names_what_no_bundled_font_draws() {
+    use crate::glyphs;
+    let fonts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts");
+    let blocks = vec![
+        paragraph("普通的字，✅ 与 ❌ 换成符号，都在"),
+        Block::List {
+            start: None,
+            items: vec![Item {
+                task: None,
+                blocks: vec![paragraph("表情 😀 在这里")],
+            }],
+        },
+        Block::Code {
+            language: None,
+            text: "fn main() {}\n".into(),
+        },
+        Block::Math("R型\\ 16种 😀".into()),
+    ];
+    let missing = glyphs::missing(&blocks, &fonts).expect("the check");
+    // One character, reported once, at its first place; the rest is covered.
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert_eq!(missing[0].ch, '😀');
+    assert!(
+        missing[0].at.contains("block 2 > item 1"),
+        "{}",
+        missing[0].at
+    );
+    assert_eq!(
+        missing[0].describe(),
+        "'😀' (U+1F600) at block 2 > item 1 > block 1"
+    );
+}
+
+#[test]
+fn coverage_reads_formulas_and_leaves_their_tex_alone() {
+    use crate::glyphs;
+    let fonts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts");
+    // ASCII in TeX is structure; the CJK it quotes is text and is covered.
+    let covered = vec![Block::Math("\\boxed{R型\\ 16种}".into())];
+    assert!(
+        glyphs::missing(&covered, &fonts)
+            .expect("the check")
+            .is_empty()
+    );
+    let absent = vec![Block::Math("x😀".into())];
+    let missing = glyphs::missing(&absent, &fonts).expect("the check");
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert!(missing[0].at.contains("formula"), "{}", missing[0].at);
+}
+
+#[test]
 fn headings_count_their_equals() {
     assert_eq!(
         body(&[Block::Heading(3, Inline::plain("标题"))]),

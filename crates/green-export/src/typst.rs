@@ -336,22 +336,22 @@ pub fn formula(tex: &str) -> Result<String> {
     })
 }
 
+/// The marks the source spells as emoji, and the markup the export draws
+/// instead: no bundled face has U+2705, U+274C or even `✗`, so a green `✓` and
+/// a red `×` carry the meaning. Colours live in the preamble.
+pub(crate) const MARKS: &[(char, &str)] = &[
+    ('✅', "#text(fill: mark-ok)[#sym.checkmark]"),
+    ('❌', "#text(fill: mark-no)[#sym.times]"),
+];
+
 /// `text` as markup, its punctuation literal.
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
-        // Emoji the bundled faces have no glyph for, as the symbols they do
-        // have, in the mark colours: a green pass, a red fail.
-        match ch {
-            '✅' => {
-                out.push_str("#text(fill: mark-ok)[#sym.checkmark]");
-                continue;
-            }
-            '❌' => {
-                out.push_str("#text(fill: mark-no)[#sym.times]");
-                continue;
-            }
-            _ => {}
+        // A mark the bundled faces cannot draw, as the symbol they can.
+        if let Some((_, markup)) = MARKS.iter().find(|(mark, _)| *mark == ch) {
+            out.push_str(markup);
+            continue;
         }
         if matches!(
             ch,

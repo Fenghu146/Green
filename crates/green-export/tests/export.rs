@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use green_export::{Block, Cli, Inline, Style, export};
+use green_export::{Block, Cli, Inline, Style, Warning, export};
 
 fn typst() -> Option<PathBuf> {
     std::env::var_os("GREEN_TYPST").map(PathBuf::from)
@@ -48,7 +48,7 @@ fn the_assignment_note_stays_under_two_megabytes() {
     assert_eq!(count, 28, "the note's 28 formulas");
 
     let out = std::env::temp_dir().join(format!("green-export-note-{}.pdf", std::process::id()));
-    let export = export(&blocks, &out, &Cli::new(exe, fonts, root)).expect("the export");
+    let export = export(&blocks, &out, &Cli::new(exe, &fonts, &root), &fonts).expect("the export");
     let _ = std::fs::remove_file(&out);
 
     assert!(
@@ -58,6 +58,7 @@ fn the_assignment_note_stays_under_two_megabytes() {
     );
     assert_eq!(export.audit.images, 0);
     assert!(export.audit.compressed);
+    assert!(export.missing.is_empty(), "{:?}", export.missing);
     assert!(export.warnings.is_empty(), "{:?}", export.warnings);
     assert!(
         export.elapsed <= Duration::from_secs(10),
@@ -86,5 +87,41 @@ fn the_assignment_note_stays_under_two_megabytes() {
             "{family} is missing; something fell back: {:?}",
             export.audit.fonts
         );
+    }
+}
+
+/// The counterexample: a character none of the four faces has is named with
+/// where it is, and the rest of the document still exports.
+#[test]
+fn a_character_no_bundled_font_has_is_reported_and_the_rest_still_exports() {
+    let Some(exe) = typst() else {
+        eprintln!("GREEN_TYPST is unset; the counterexample did not run");
+        return;
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("the repository root");
+    let fonts = root.join("assets/fonts");
+    let blocks = vec![
+        Block::Paragraph(Inline::plain("这一段正常")),
+        Block::Paragraph(Inline::plain("表情 😀 在第二段")),
+    ];
+    let out = std::env::temp_dir().join(format!("green-export-tofu-{}.pdf", std::process::id()));
+    let export = export(&blocks, &out, &Cli::new(exe, &fonts, &root), &fonts).expect("the export");
+    let _ = std::fs::remove_file(&out);
+
+    assert_eq!(export.missing.len(), 1, "{:?}", export.missing);
+    assert_eq!(export.missing[0].ch, '😀');
+    assert_eq!(export.missing[0].describe(), "'😀' (U+1F600) at block 2");
+    // The rest went out: pages, bytes, and one warning naming the character.
+    assert!(export.audit.pages >= 1);
+    assert!(export.audit.bytes > 0);
+    match export.warnings.as_slice() {
+        [Warning::MissingGlyphs { found }, rest @ ..] => {
+            assert_eq!(found, &["'😀' (U+1F600) at block 2".to_string()]);
+            assert!(rest.is_empty(), "{rest:?}");
+        }
+        other => panic!("expected the missing-glyph warning first: {other:?}"),
     }
 }

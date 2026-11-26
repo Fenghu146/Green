@@ -79,6 +79,11 @@ pub enum Warning {
         /// Its share, 0 to 1.
         share: f64,
     },
+    /// Characters none of the bundled fonts draws: Typst would print tofu.
+    MissingGlyphs {
+        /// Each missing character, with where it first appears.
+        found: Vec<String>,
+    },
 }
 
 impl Warning {
@@ -100,6 +105,11 @@ impl Warning {
             Self::Coverage { page, share } => format!(
                 "export pdf: page {page} has a picture over {:.1}% of its area, over 40%",
                 share * 100.0
+            ),
+            Self::MissingGlyphs { found } => format!(
+                "export: {} characters are in none of the bundled fonts: {}",
+                found.len(),
+                found.join(", ")
             ),
         }
     }
