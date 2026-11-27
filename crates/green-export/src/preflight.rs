@@ -5,19 +5,21 @@
 //! `ely-documents::math`; export keeps its own so the PDF path stays vector
 //! only and does not pull in the component library.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use anyhow::{Context as _, Result, anyhow, bail};
 use ::typst::{
+    LibraryExt as _,
     diag::FileError,
     foundations::{Bytes, Datetime, Duration},
     syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot},
     text::{Font, FontBook},
     utils::LazyHash,
-    LibraryExt as _,
 };
+use anyhow::{Context as _, Result, anyhow, bail};
 use typst_layout::PagedDocument;
-
 
 /// The bundled faces and one fixed in-memory source, shared by every probe.
 pub struct Preflight {
@@ -45,12 +47,11 @@ impl Preflight {
         if book.select("noto sans math", Default::default()).is_none() {
             bail!("Noto Sans Math is not among the bundled faces");
         }
-        let main = FileId::new(
-            RootedPath::new(
-                VirtualRoot::Project,
-                VirtualPath::new("preflight.typ").map_err(|_| anyhow!("preflight.typ is not virtual"))?,
-            ),
-        );
+        let main = FileId::new(RootedPath::new(
+            VirtualRoot::Project,
+            VirtualPath::new("preflight.typ")
+                .map_err(|_| anyhow!("preflight.typ is not virtual"))?,
+        ));
         Ok(Self {
             library: LazyHash::new(::typst::Library::default()),
             book: LazyHash::new(book),
@@ -59,13 +60,21 @@ impl Preflight {
         })
     }
 
+    /// The bundled faces and one in-memory source, as a `World`. `root` is
+    /// where relative files, such as pictures, are read from; the preflight
+    /// itself never needs one.
+    pub(crate) fn world<'a>(&'a self, text: String, root: Option<&'a Path>) -> World<'a> {
+        World {
+            preflight: self,
+            source: Source::new(self.main, text),
+            root,
+        }
+    }
+
     /// `markup` as a one-formula document: does Typst actually typeset it?
     pub fn check(&self, markup: &str) -> Result<()> {
         let source = format!("{} $ {markup} $\n", crate::typst::preamble());
-        let world = World {
-            preflight: self,
-            source: Source::new(self.main, source),
-        };
+        let world = self.world(source, None);
         let result = ::typst::compile::<PagedDocument>(&world);
         for warning in &result.warnings {
             log::warn!("export: typst said: {}", warning.message);
@@ -84,9 +93,21 @@ impl Preflight {
     }
 }
 
-struct World<'a> {
+pub(crate) struct World<'a> {
     preflight: &'a Preflight,
     source: Source,
+    root: Option<&'a Path>,
+}
+
+impl World<'_> {
+    /// A virtual path under the export's root. Nothing outside that root is
+    /// readable, the same boundary the CLI gets from `--root`.
+    fn path(&self, id: FileId) -> ::typst::diag::FileResult<PathBuf> {
+        match (id.root(), self.root) {
+            (VirtualRoot::Project, Some(root)) => Ok(id.vpath().realize(root)?),
+            _ => Err(FileError::NotFound(id.vpath().get_without_slash().into())),
+        }
+    }
 }
 
 impl ::typst::World for World<'_> {
@@ -105,13 +126,25 @@ impl ::typst::World for World<'_> {
     fn source(&self, id: FileId) -> ::typst::diag::FileResult<Source> {
         match id == self.preflight.main {
             true => Ok(self.source.clone()),
-            false => Err(FileError::NotFound(id.vpath().get_without_slash().into())),
+            false => {
+                let path = self.path(id)?;
+                let text =
+                    fs::read_to_string(&path).map_err(|error| FileError::from_io(error, &path))?;
+                Ok(Source::new(id, text))
+            }
         }
     }
 
     fn file(&self, id: FileId) -> ::typst::diag::FileResult<Bytes> {
-        self.source(id)
-            .map(|source| Bytes::new(source.text().as_bytes().to_vec()))
+        match id == self.preflight.main {
+            true => Ok(Bytes::new(self.source.text().as_bytes().to_vec())),
+            false => {
+                let path = self.path(id)?;
+                fs::read(&path)
+                    .map(Bytes::new)
+                    .map_err(|error| FileError::from_io(error, &path))
+            }
+        }
     }
 
     fn font(&self, index: usize) -> Option<Font> {

@@ -10,7 +10,7 @@ pub mod preflight;
 pub mod typst;
 
 pub use audit::{Audit, Font, Warning};
-pub use compile::{Cli, Compiler};
+pub use compile::{Cli, Compiler, Lib};
 pub use doc::{Align, Block, Inline, Item, Style};
 pub use export::{Export, export};
 pub use glyphs::Missing;
