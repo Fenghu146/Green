@@ -23,6 +23,8 @@
 
 ## 打包与便携
 
+- **`.md` 文件关联**：可做，但需要一套卸载残留的验证（`OpenWithProgids` 的值、`Applications\green.exe` 整个键、`SHChangeNotify` 不调用会让图标缓存不刷），1.0.0 不做——注册表一个字节都不写，`HKCU\Software\Classes` 也不碰。
+
 - 便携模式（`<exe>/data` 存在即用）现在是 `apps/green/src/portable.rs` 的产品策略，`crates/` 层不知道“便携”这个概念。若将来多个 app 共用这套策略，再把它上移进 `ely-platform`。
 
 ## 平台
