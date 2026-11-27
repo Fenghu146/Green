@@ -5,7 +5,7 @@
 #
 # This drive is 451 GB. Our own footprint is 133 GB; the other 298 GB belongs to
 # other projects and is not ours to delete. Multi-line work keeps a hot target dir
-# per line (D:\cargo-target\<line>), and several of those building at once settle
+# per line (D:\green-targets\<line>), and several of those building at once settle
 # between 30 and 50 GB free. That 30-50 GB is the sustainable water level on this
 # machine, not 100 GB: reaching 100 GB would mean deleting other people's data.
 # So the defaults fail below 30 GB and only WARN below 50 GB. CI passes smaller

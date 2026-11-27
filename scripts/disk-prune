@@ -8,6 +8,7 @@
 #
 # DISK_PRUNE_ONLY=main/debug,plugins/debug restricts a run to exact paths
 # relative to the target root: apply only what a reviewed dry run listed.
+# A top-level profile (debug, release, ...) is considered only when named here.
 #
 # Deletable means: a profile directory under the target root (debug, release,
 # release-fast, debug-*, release-*) whose last write is at least 15 minutes old,
@@ -17,18 +18,14 @@
 # Never touches a checkout (including D:\Amp\Green), vendor/, patches/, assets/
 # or sccache; never runs `git worktree remove --force` or a bare `cargo clean`.
 #
-# The flat pools are unowned by design. The machine-level CARGO_TARGET_DIR keeps
-# `target/` from growing inside a checkout, but every build that forgets a
-# per-line target dir lands in debug/ release/ release-fast/ instead. Those three
-# are therefore fair game whole whenever nothing is building; each line is still
-# required to set CARGO_TARGET_DIR=D:\cargo-target\<line>.
+# 顶层 profile 目录可能是别的项目共享的构建缓存（同一台机器上不止这一个项目用 `D:\cargo-target`）。**任何全量清理都必须由人逐条列名批准，脚本不得自行扩大范围。**
 #
 # Deletion goes through `robocopy /MIR` from an empty directory, then removes the
 # empty root: on Windows that beats Remove-Item -Recurse on trees of small files
 # by a wide margin (measured: 35 GB / 8.8k files in 16 s).
 set -uo pipefail
 
-root=${DISK_PRUNE_ROOT:-/d/cargo-target}
+root=${DISK_PRUNE_ROOT:-/d/green-targets}
 min_age=${DISK_PRUNE_AGE:-15}
 apply=0
 for arg in "$@"; do
@@ -121,7 +118,12 @@ candidates=()
 for entry in "$root"/*/; do
   entry=${entry%/}
   if is_profile "${entry##*/}"; then
-    candidates+=("$entry")
+    # A top-level profile is never an automatic candidate. Only an exact,
+    # human-reviewed DISK_PRUNE_ONLY entry may put it on the list.
+    rel=${entry#"$root"/}
+    if [ -n "$only" ] && [ -n "${allowed[$rel]+x}" ]; then
+      candidates+=("$entry")
+    fi
     continue
   fi
   for sub in "$entry"/*/; do

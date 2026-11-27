@@ -256,6 +256,8 @@ jobs:
       - run: cargo test --manifest-path tools/Cargo.toml --locked
       # The committed fixtures must be exactly what the generator writes.
       - run: cargo run --manifest-path tools/Cargo.toml --bin fixtures --locked -- --check
+      # disk-prune's root and its top-level-profile rule need no build input.
+      - run: bash tests/scripts/disk-prune-rules.sh
 
   licenses:
     name: licenses
