@@ -21,6 +21,7 @@
 - **顶层 profile 永不自动清理。** `scripts/disk-prune` 默认根是 `/d/green-targets`；顶层 `debug` / `release` / `release-fast` / `compile` 只有在 `DISK_PRUNE_ONLY` 里逐条列名才会进入候选。判定“在跑”仍以 `<profile>\.cargo-lock` 能否独占打开为准，叠加无 `cargo`/`rustc` 进程、15 分钟无写入；删除前脚本会重探一次锁。
 - **磁盘账：Green 多线 target 一度占到 120 GB 以上，把共用卷挤到 190 MB；2026-11-27 清理释放 62.50 GiB。** 教训是共享根目录里的任何自动清理都必须能证明它没删别人的东西；因此搬出共享根、默认根物理隔离、顶层 profile 不进自动候选。回收磁盘仍用 `scripts/disk-prune`，先 dry run 看判决。
 - **已知债：磁盘阈值散在三处**（`.github/workflows/ci.yml` 的 runner 数字、`scripts/disk.sh` 的 30/50、`scripts/disk-prune` 的判定逻辑），迟早会分叉。应收口到一处：阈值只写在 `disk.sh`，CI 只调用它，`disk-prune` 只读它的默认值。
+- **已知债：`crates/green-plugins/tests/process.rs` 长期在 600 行上下**（16b54aa 600 行、d9cd326 604 行、当前 607 行；本轮只净加 3 行）。15 个进程用例塞一个文件是历史结构，拆分另开一轮。
 - **已定：CI 装 Typst 0.15.1。** test job 下载 v0.15.1 的 Windows 二进制（缓存 key 带版本号），解压后把路径写进 `GREEN_TYPST`；`crates/green-math/src/tests.rs` 的 `every_covered_sample_compiles_in_typst` 与 `crates/green-export/tests/export.rs` 的端到端测试因此真正执行。下载失败、找不到 `typst.exe` 或版本不符就让 job 红，不静默退化成跳过——真编译测试是挡住非法 Typst 的唯一防线，静默跳过等于没有这个测试。
 - **事实集中到一处：`ci.yml` 只描述行为。** 不在注释里写「目前还没有 / as of ...」这类会过期的状态；当前状态、已查明原因与待决项都写在 `STATUS.md`。
 - **CI 的 `cancel-in-progress` 会吞掉中间提交的信号。** `concurrency` 按 ref 分组并取消进行中的 run；频繁推 main 时，被取消的中间提交永远拿不到完整绿。发版前要一次「完整绿」，以最后那个 HEAD 的完整 run 为准，别拿被取消的 run 说事。

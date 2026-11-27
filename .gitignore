@@ -23,6 +23,9 @@ __pycache__/
 /*.csr
 /*.cer
 vendor/Cargo.lock
+# vendor-components.sh prunes Cargo.lock from the vendored component library;
+# a build inside that workspace regenerates it, and it is not source.
+vendor/**/Cargo.lock
 vendor/target/
 
 # Research inputs: third-party clones and downloads, not the repo
