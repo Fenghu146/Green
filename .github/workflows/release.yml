@@ -6,9 +6,6 @@ name: release
 on:
   push:
     tags: ['v*']
-    # TEMPORARY: GitHub dispatches only a workflow that exists on the default
-    # branch. Remove this line in the commit that merges this file to main.
-    branches: [release-workflow]
   workflow_dispatch:
 
 permissions:

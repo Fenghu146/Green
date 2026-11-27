@@ -27,7 +27,9 @@
 - 发行流程：`.github/workflows/release.yml`，tag `v*` 发布、`workflow_dispatch` 只演练不发布；试验用的 `release-trial.yml` 已并入它的 dispatch 模式并删除。打包规则、macOS 签名与 `--capture` 的坑写在 `docs/packaging.md`，tag 已存在但 Release 没出来的恢复流程写在 `docs/release-recovery.md`。
 - **1.0.0 的发布形态**：Windows 出 NSIS 安装包（每用户、不要求管理员）+ 便携 zip；macOS 出 `.dmg`（UDZO，拖进「应用程序」）+ `.app` zip，arm64 与 x86_64 各一份；Linux 仍是 `tar.gz`。**不写注册表、不做 `.md` 文件关联**（`later.md` 记着为什么），卸载残留由 CI 断言。
 - 版本闸门现在是三样对齐：tag、`Cargo.toml`、`CHANGELOG.md` 里的 `## <版本>`。
-- **排练记录（zip 时代）**：run `45945920216` 四格全绿（windows zip 55,977,896 B、macos-aarch64 55,168,123 B、macos-x86_64 57,283,764 B、linux tar.gz 65,790,720 B），Linux 包最高符号 `GLIBC_2.35`。安装包与 dmg 的排练数字记在下一次运行的 artifact 与 job summary 里（summary 里就是下一版的字节基线）。
+- **1.0.0 安装包排练**：run `45961719992`（分支 `release-workflow`）四格全绿，`publish` 跳过（非 tag）。字节数（也就是下一版的基线）：`Green-1.0.0-x64-setup.exe` 42,835,887；`Green-1.0.0-windows-x64-portable.zip` 55,980,805；`Green-1.0.0-arm64.dmg` 57,604,378；`Green-1.0.0-macos-arm64.zip` 55,164,105；`Green-1.0.0-x64.dmg` 60,095,997；`Green-1.0.0-macos-x64.zip` 57,288,006；`Green-1.0.0-linux-x64.tar.gz` 65,784,992。Linux 包最高符号 `GLIBC_2.35`。
+- **负向自证**：run `45960091012` 里故意让 Linux 包不带字体，`Smoke (Linux)` 红——`Green cannot start: the bundled fonts did not load: …/Green-1.0.0-linux-x64/fonts/NotoSansCJKsc-Regular.otf: No such file or directory`，其余三格仍绿；恢复后 run `45961719992` 重新全绿。
+- **装完再启动**：每个安装包都在 CI 里真的装上/挂载后，从安装位置启动并渲染 `6.2.md`；三格都断言 `fonts: 4 files from` 且路径不是源码树（Windows 实测 `C:\Users\runneradmin\AppData\Local\Programs\Green\fonts`）。Windows 另外跑 `Uninstall.exe /S` 并断言安装目录与 `HKCU` 三个键都清干净、`HKCU\Software\Classes` 从未被写过。
 - `release.yml` 里的 `push: branches: [release-workflow]` 只是权宜：GitHub 只能 dispatch 默认分支上已有的工作流。合并到 main 时删掉这一行，之后用 dispatch 排练。
 - **`publish` 这一段从未执行过**（要 tag 才会跑）：tag 前必须先在 main 上 dispatch 一次确认四格仍绿。
 
