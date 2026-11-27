@@ -196,10 +196,9 @@ impl MarkdownDocument {
                 return Err(EditRefusal::Changed);
             }
         }
-        self.editor.update(cx, |editor, cx| {
-            editor.edit(edits, cx);
-            editor.select(std::iter::once(selected), cx);
-        });
+        self.edit_source(edits, cx);
+        self.editor
+            .update(cx, |editor, cx| editor.select(std::iter::once(selected), cx));
         Ok(())
     }
 }

@@ -117,7 +117,8 @@ pub use text::{
     bind_keys, from_utf16, to_utf16,
 };
 pub use text::{Copy, Cut, Highlight, History, InputEvent, Paste, SelectAll, TextInput};
-pub(crate) use text::{Left, Right};
+#[doc(hidden)]
+pub use text::{Left, Right};
 pub use transfer::TransferList;
 pub use unit::UnitInput;
 pub use upload::{Upload, UploadList, UploadState};

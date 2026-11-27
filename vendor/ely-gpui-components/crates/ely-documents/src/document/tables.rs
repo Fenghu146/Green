@@ -309,10 +309,9 @@ impl MarkdownDocument {
         let (table, caret) = table_text(&grid, &[AlignKind::None; 3], (0, 0, 0), "", eol);
         let caret = from + before.len() + caret;
         log::info!("markdown document: a table goes in");
-        self.editor.update(cx, |editor, cx| {
-            editor.edit([(from..end, format!("{before}{table}{after}"))], cx);
-            editor.select(std::iter::once(caret..caret), cx);
-        });
+        self.edit_source(vec![(from..end, format!("{before}{table}{after}"))], cx);
+        self.editor
+            .update(cx, |editor, cx| editor.select(std::iter::once(caret..caret), cx));
         Ok(())
     }
 }

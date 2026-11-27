@@ -548,6 +548,28 @@ impl Render for MarkdownDocument {
                             cx.stop_propagation();
                             document.commit(cx);
                             window.focus(&document.focus, cx);
+                            return;
+                        }
+                    }),
+                )
+                .capture_action(cx.listener(|document, _: &forms::Left, _, cx| {
+                    if document.mode == MarkdownMode::Visual && document.cross_formula(false, cx) {
+                        cx.stop_propagation();
+                    }
+                }))
+                .capture_action(cx.listener(|document, _: &forms::Right, _, cx| {
+                    if document.mode == MarkdownMode::Visual && document.cross_formula(true, cx) {
+                        cx.stop_propagation();
+                    }
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|document, event: &gpui::MouseUpEvent, _, cx| {
+                        if event.click_count == 2
+                            && document.mode == MarkdownMode::Visual
+                            && document.select_formula(cx)
+                        {
+                            cx.stop_propagation();
                         }
                     }),
                 )

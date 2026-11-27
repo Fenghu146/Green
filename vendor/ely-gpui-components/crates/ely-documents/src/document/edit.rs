@@ -1,10 +1,11 @@
-use std::ops::Range;
+use std::{ops::Range, rc::Rc};
 
 use gpui::{AppContext as _, Context, Entity, Focusable as _, Subscription, Window};
 
 use super::{
     DocumentEvent, MarkdownDocument, Open, TargetBlock,
     cells::{self, Aim, Move},
+    formula,
 };
 use crate::{
     forms::{InputEvent, TextInput},
@@ -162,6 +163,10 @@ impl MarkdownDocument {
             },
         };
         let source = text[range.clone()].to_string();
+        let caret = match self.mode {
+            MarkdownMode::Visual => caret.map(|at| formula::snap_caret(&source, at)),
+            _ => caret,
+        };
         let (input, subscriptions) = self.new_field(source, cell.is_some(), window, cx);
         if let Some(caret) = caret {
             input.update(cx, |input, cx| input.select(caret..caret, cx));
@@ -193,9 +198,12 @@ impl MarkdownDocument {
         cx: &mut Context<Self>,
     ) -> (Entity<TextInput>, Vec<Subscription>) {
         let found = self.found_open.clone();
+        // This constructor is the document's block body (or grown body) alone;
+        // find, rename and dialog fields are made by their owners, never here.
+        let atomic = self.mode == MarkdownMode::Visual;
         let input = cx.new(|cx| {
             // A find's matches over the syntax's colors.
-            let input = TextInput::new(window, cx).highlighter(move |text, cx| {
+            let mut input = TextInput::new(window, cx).highlighter(move |text, cx| {
                 let mut spans = markdown_highlights(text, cx);
                 // Typing since the last frame can leave one past the text.
                 let fits = |range: &Range<usize>| {
@@ -212,6 +220,11 @@ impl MarkdownDocument {
                 );
                 spans
             });
+            if atomic {
+                input.set_fit(Rc::new(|base, range, incoming| {
+                    formula::edit_in(base, range, incoming)
+                }));
+            }
             match cell {
                 true => input,
                 false => input.multi_line(1, usize::MAX),
@@ -302,6 +315,65 @@ impl MarkdownDocument {
         open.lent = Some(watch);
     }
 
+    /// A plain arrow steps over a whole formula in visual mode.
+    pub(super) fn cross_formula(&mut self, right: bool, cx: &mut Context<Self>) -> bool {
+        let Some(open) = &self.open else {
+            return false;
+        };
+        let text = open.input.read(cx).text().to_string();
+        let at = open.input.read(cx).cursor();
+        let span = formula::spans(&text)
+            .into_iter()
+            .find(|span| span.start <= at && at <= span.end);
+        let to = match span {
+            Some(span) if right && at < span.end => span.end,
+            Some(span) if !right && at > span.start => span.start,
+            _ => return false,
+        };
+        open.input.update(cx, |input, cx| input.select(to..to, cx));
+        true
+    }
+
+    /// A second press selects the formula a word click fell in.
+    pub(super) fn select_formula(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(open) = &self.open else {
+            return false;
+        };
+        let text = open.input.read(cx).text().to_string();
+        let at = open.input.read(cx).cursor();
+        let span = formula::spans(&text)
+            .into_iter()
+            .find(|span| span.start < at && at < span.end);
+        match span {
+            Some(span) => {
+                open.input.update(cx, |input, cx| input.select(span, cx));
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The document's one source-edit funnel: visual cuts widen to whole
+    /// formulas; source mode keeps its literal bytes. `CodeEditor` is untouched.
+    pub(super) fn edit_source(
+        &mut self,
+        edits: Vec<(Range<usize>, String)>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let edits = match self.mode {
+            MarkdownMode::Visual => {
+                let text = self.editor.read(cx).text();
+                formula::expand_edits(&text, edits)
+            }
+            _ => edits,
+        };
+        if edits.is_empty() {
+            return false;
+        }
+        self.editor.update(cx, |editor, cx| editor.edit(edits, cx));
+        true
+    }
+
     /// Writes the open block as one step; the edit made.
     pub(super) fn commit(&mut self, cx: &mut Context<Self>) -> Option<(Range<usize>, usize)> {
         // A drag or aim ends with its field.
@@ -331,10 +403,13 @@ impl MarkdownDocument {
         if edit.is_some() {
             self.writes += 1;
             let start = open.range.start;
-            let landed = self.editor.update(cx, |editor, cx| {
-                editor.edit([(open.range, written.clone())], cx);
-                editor.text().get(start..start + written.len()) == Some(written.as_str())
-            });
+            self.edit_source(vec![(open.range.clone(), written.clone())], cx);
+            let landed = self
+                .editor
+                .read(cx)
+                .text()
+                .get(start..start + written.len())
+                == Some(written.as_str());
             if !landed {
                 self.writes -= 1;
                 log::error!("markdown document: the editor refused a write-back");

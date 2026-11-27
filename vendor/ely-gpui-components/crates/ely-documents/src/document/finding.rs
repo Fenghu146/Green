@@ -128,7 +128,7 @@ impl MarkdownDocument {
         log::info!("markdown document: {} replaced", edits.len());
         // Its own change: an open block outlives it.
         self.writes += 1;
-        self.editor.update(cx, |editor, cx| editor.edit(edits, cx));
+        self.edit_source(edits, cx);
         true
     }
 

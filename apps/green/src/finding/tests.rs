@@ -1,5 +1,5 @@
 use ely_gpui_component::forms::TextInput;
-use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext};
+use gpui::{AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext};
 
 use crate::desk::{
     Desk,
@@ -38,6 +38,30 @@ fn current_text(desk: &Entity<Desk>, cx: &mut VisualTestContext) -> String {
         let view = desk.active_view().expect("a tab");
         view.read(cx).document().read(cx).text(cx)
     })
+}
+
+#[gpui::test]
+fn a_find_field_has_no_formula_guard(cx: &mut TestAppContext) {
+    let (desk, cx, _files) = opened("a\n", cx);
+    desk.update_in(cx, |desk, window, cx| {
+        desk.on_find(&ely_office::FindReplace, window, cx)
+    });
+    let field = desk.read_with(cx, |desk, _| desk.finding.as_ref().unwrap().query.clone());
+    desk.update_in(cx, |_, window, cx| {
+        field.update(cx, |input, cx| {
+            input.set_text("通项 $a_n$ 后", cx);
+            input.select(8..9, cx);
+        });
+        window.focus(&field.focus_handle(cx), cx);
+    });
+    cx.run_until_parked();
+    cx.simulate_input("x");
+    cx.run_until_parked();
+    assert_eq!(
+        field.read_with(cx, |input, _| input.text().to_string()),
+        "通项 $x_n$ 后",
+        "the find query replaces only the selected byte"
+    );
 }
 
 #[gpui::test]

@@ -2,8 +2,9 @@ mod windows;
 
 use std::{cell::RefCell, path::Path, rc::Rc};
 
+use ely_gpui_component::forms::TextInput;
 use ely_platform::AppId;
-use gpui::{Entity, TestAppContext, VisualTestContext};
+use gpui::{AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext};
 
 use super::{Desk, open_in};
 use crate::view::Mode;
@@ -57,6 +58,40 @@ fn outline(desk: &Entity<Desk>, cx: &mut VisualTestContext) -> Vec<(usize, Strin
             .map(|heading| (usize::from(heading.depth), heading.title, heading.line))
             .collect()
     })
+}
+
+#[gpui::test]
+fn a_dialog_field_has_no_formula_guard(cx: &mut TestAppContext) {
+    let (data, files) = (
+        tempfile::tempdir().expect("data"),
+        tempfile::tempdir().expect("files"),
+    );
+    let path = files.path().join("a.md");
+    std::fs::write(&path, "a\n").expect("a file");
+    let (desk, cx) = start(cx, data.path());
+    open(&desk, &path, cx);
+    let field = desk.update_in(cx, |desk, window, cx| {
+        let field = cx.new(|cx| TextInput::new(window, cx));
+        field.update(cx, |input, cx| {
+            input.set_text("通项 $a_n$ 后", cx);
+            input.select(8..9, cx);
+        });
+        desk.naming = Some((0, field.clone()));
+        window.focus(&field.focus_handle(cx), cx);
+        field
+    });
+    cx.run_until_parked();
+    // A prompt opens with its text selected; put the caret back inside the
+    // formula to show the dialog field itself has no guard.
+    field.update(cx, |input, cx| input.select(8..9, cx));
+    cx.run_until_parked();
+    cx.simulate_input("x");
+    cx.run_until_parked();
+    assert_eq!(
+        field.read_with(cx, |input, _| input.text().to_string()),
+        "通项 $x_n$ 后",
+        "a dialog field replaces only the selected byte"
+    );
 }
 
 #[gpui::test]

@@ -53,10 +53,9 @@ impl MarkdownDocument {
         }
         let caret = self.editor.read(cx).primary().range();
         let after = caret.start + text.len();
-        self.editor.update(cx, |editor, cx| {
-            editor.edit([(caret, text.to_string())], cx);
-            editor.select(std::iter::once(after..after), cx);
-        });
+        self.edit_source(vec![(caret, text.to_string())], cx);
+        self.editor
+            .update(cx, |editor, cx| editor.select(std::iter::once(after..after), cx));
         true
     }
 }

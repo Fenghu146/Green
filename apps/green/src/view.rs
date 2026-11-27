@@ -375,4 +375,6 @@ mod menu;
 #[cfg(test)]
 mod fold_tests;
 #[cfg(test)]
+mod formula_atom_tests;
+#[cfg(test)]
 mod tests;

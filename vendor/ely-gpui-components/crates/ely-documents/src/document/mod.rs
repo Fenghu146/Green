@@ -5,6 +5,7 @@ mod cells;
 mod edit;
 mod finding;
 mod fold;
+mod formula;
 mod format;
 mod lists;
 mod look;

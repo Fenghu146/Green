@@ -1,0 +1,517 @@
+baseline: ely-gpui-components fc71e964088e0de2a81abff572a5684be17ebfd4, the rev Cargo.toml pins
+why: Green S2b-2 needs inline `$…$` to be one atom in visual mode. Both real write paths (the open block TextInput and document source edits) live in ely-documents, and Changed is post-hoc, so the widening must sit here; upstream default keeps literal character edits inside formulas and this patch only changes visual mode. Drop it if the fork implements atomic inline math itself.
+bump: Drop this patch when the fork grows its own atomic formulas; if TextInput::set_fit or the document edit funnels move, rewrite the hunks instead of replaying them.
+diff --git a/vendor/ely-gpui-components/crates/ely-core/src/forms/mod.rs b/vendor/ely-gpui-components/crates/ely-core/src/forms/mod.rs
+index 7df515e..2770f39 100644
+--- a/vendor/ely-gpui-components/crates/ely-core/src/forms/mod.rs
++++ b/vendor/ely-gpui-components/crates/ely-core/src/forms/mod.rs
+@@ -117,7 +117,8 @@ pub use text::{
+     bind_keys, from_utf16, to_utf16,
+ };
+ pub use text::{Copy, Cut, Highlight, History, InputEvent, Paste, SelectAll, TextInput};
+-pub(crate) use text::{Left, Right};
++#[doc(hidden)]
++pub use text::{Left, Right};
+ pub use transfer::TransferList;
+ pub use unit::UnitInput;
+ pub use upload::{Upload, UploadList, UploadState};
+diff --git a/vendor/ely-gpui-components/crates/ely-core/src/forms/text/mod.rs b/vendor/ely-gpui-components/crates/ely-core/src/forms/text/mod.rs
+index fa4c52a..6037d57 100644
+--- a/vendor/ely-gpui-components/crates/ely-core/src/forms/text/mod.rs
++++ b/vendor/ely-gpui-components/crates/ely-core/src/forms/text/mod.rs
+@@ -18,7 +18,8 @@ pub use actions::{
+     bind_keys,
+ };
+ pub use actions::{Copy, Cut, Paste, SelectAll};
+-pub(crate) use actions::{Left, Right};
++#[doc(hidden)]
++pub use actions::{Left, Right};
+ use edit::Snapshot;
+ pub use edit::{History, from_utf16, to_utf16};
+ pub use highlight::Highlight;
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/apart.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/apart.rs
+index 6561a12..0b214ca 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/apart.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/apart.rs
+@@ -196,10 +196,9 @@ impl MarkdownDocument {
+                 return Err(EditRefusal::Changed);
+             }
+         }
+-        self.editor.update(cx, |editor, cx| {
+-            editor.edit(edits, cx);
+-            editor.select(std::iter::once(selected), cx);
+-        });
++        self.edit_source(edits, cx);
++        self.editor
++            .update(cx, |editor, cx| editor.select(std::iter::once(selected), cx));
+         Ok(())
+     }
+ }
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/attach.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/attach.rs
+index 376f7d7..fc699cf 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/attach.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/attach.rs
+@@ -53,10 +53,9 @@ impl MarkdownDocument {
+         }
+         let caret = self.editor.read(cx).primary().range();
+         let after = caret.start + text.len();
+-        self.editor.update(cx, |editor, cx| {
+-            editor.edit([(caret, text.to_string())], cx);
+-            editor.select(std::iter::once(after..after), cx);
+-        });
++        self.edit_source(vec![(caret, text.to_string())], cx);
++        self.editor
++            .update(cx, |editor, cx| editor.select(std::iter::once(after..after), cx));
+         true
+     }
+ }
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/edit.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/edit.rs
+index daa80d3..43ef08f 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/edit.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/edit.rs
+@@ -1,10 +1,11 @@
+-use std::ops::Range;
++use std::{ops::Range, rc::Rc};
+ 
+ use gpui::{AppContext as _, Context, Entity, Focusable as _, Subscription, Window};
+ 
+ use super::{
+     DocumentEvent, MarkdownDocument, Open, TargetBlock,
+     cells::{self, Aim, Move},
++    formula,
+ };
+ use crate::{
+     forms::{InputEvent, TextInput},
+@@ -162,6 +163,10 @@ impl MarkdownDocument {
+             },
+         };
+         let source = text[range.clone()].to_string();
++        let caret = match self.mode {
++            MarkdownMode::Visual => caret.map(|at| formula::snap_caret(&source, at)),
++            _ => caret,
++        };
+         let (input, subscriptions) = self.new_field(source, cell.is_some(), window, cx);
+         if let Some(caret) = caret {
+             input.update(cx, |input, cx| input.select(caret..caret, cx));
+@@ -193,9 +198,12 @@ impl MarkdownDocument {
+         cx: &mut Context<Self>,
+     ) -> (Entity<TextInput>, Vec<Subscription>) {
+         let found = self.found_open.clone();
++        // This constructor is the document's block body (or grown body) alone;
++        // find, rename and dialog fields are made by their owners, never here.
++        let atomic = self.mode == MarkdownMode::Visual;
+         let input = cx.new(|cx| {
+             // A find's matches over the syntax's colors.
+-            let input = TextInput::new(window, cx).highlighter(move |text, cx| {
++            let mut input = TextInput::new(window, cx).highlighter(move |text, cx| {
+                 let mut spans = markdown_highlights(text, cx);
+                 // Typing since the last frame can leave one past the text.
+                 let fits = |range: &Range<usize>| {
+@@ -212,6 +220,11 @@ impl MarkdownDocument {
+                 );
+                 spans
+             });
++            if atomic {
++                input.set_fit(Rc::new(|base, range, incoming| {
++                    formula::edit_in(base, range, incoming)
++                }));
++            }
+             match cell {
+                 true => input,
+                 false => input.multi_line(1, usize::MAX),
+@@ -302,6 +315,65 @@ impl MarkdownDocument {
+         open.lent = Some(watch);
+     }
+ 
++    /// A plain arrow steps over a whole formula in visual mode.
++    pub(super) fn cross_formula(&mut self, right: bool, cx: &mut Context<Self>) -> bool {
++        let Some(open) = &self.open else {
++            return false;
++        };
++        let text = open.input.read(cx).text().to_string();
++        let at = open.input.read(cx).cursor();
++        let span = formula::spans(&text)
++            .into_iter()
++            .find(|span| span.start <= at && at <= span.end);
++        let to = match span {
++            Some(span) if right && at < span.end => span.end,
++            Some(span) if !right && at > span.start => span.start,
++            _ => return false,
++        };
++        open.input.update(cx, |input, cx| input.select(to..to, cx));
++        true
++    }
++
++    /// A second press selects the formula a word click fell in.
++    pub(super) fn select_formula(&mut self, cx: &mut Context<Self>) -> bool {
++        let Some(open) = &self.open else {
++            return false;
++        };
++        let text = open.input.read(cx).text().to_string();
++        let at = open.input.read(cx).cursor();
++        let span = formula::spans(&text)
++            .into_iter()
++            .find(|span| span.start < at && at < span.end);
++        match span {
++            Some(span) => {
++                open.input.update(cx, |input, cx| input.select(span, cx));
++                true
++            }
++            None => false,
++        }
++    }
++
++    /// The document's one source-edit funnel: visual cuts widen to whole
++    /// formulas; source mode keeps its literal bytes. `CodeEditor` is untouched.
++    pub(super) fn edit_source(
++        &mut self,
++        edits: Vec<(Range<usize>, String)>,
++        cx: &mut Context<Self>,
++    ) -> bool {
++        let edits = match self.mode {
++            MarkdownMode::Visual => {
++                let text = self.editor.read(cx).text();
++                formula::expand_edits(&text, edits)
++            }
++            _ => edits,
++        };
++        if edits.is_empty() {
++            return false;
++        }
++        self.editor.update(cx, |editor, cx| editor.edit(edits, cx));
++        true
++    }
++
+     /// Writes the open block as one step; the edit made.
+     pub(super) fn commit(&mut self, cx: &mut Context<Self>) -> Option<(Range<usize>, usize)> {
+         // A drag or aim ends with its field.
+@@ -331,10 +403,13 @@ impl MarkdownDocument {
+         if edit.is_some() {
+             self.writes += 1;
+             let start = open.range.start;
+-            let landed = self.editor.update(cx, |editor, cx| {
+-                editor.edit([(open.range, written.clone())], cx);
+-                editor.text().get(start..start + written.len()) == Some(written.as_str())
+-            });
++            self.edit_source(vec![(open.range.clone(), written.clone())], cx);
++            let landed = self
++                .editor
++                .read(cx)
++                .text()
++                .get(start..start + written.len())
++                == Some(written.as_str());
+             if !landed {
+                 self.writes -= 1;
+                 log::error!("markdown document: the editor refused a write-back");
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/finding.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/finding.rs
+index 5b4bff5..6a9c8d5 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/finding.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/finding.rs
+@@ -128,7 +128,7 @@ impl MarkdownDocument {
+         log::info!("markdown document: {} replaced", edits.len());
+         // Its own change: an open block outlives it.
+         self.writes += 1;
+-        self.editor.update(cx, |editor, cx| editor.edit(edits, cx));
++        self.edit_source(edits, cx);
+         true
+     }
+ 
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/formula.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/formula.rs
+new file mode 100644
+index 0000000..8d31369
+--- /dev/null
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/formula.rs
+@@ -0,0 +1,212 @@
++//! Inline `$…$` as one atom in the document's own edit layer (patch 0006).
++
++use std::ops::Range;
++
++/// Single-dollar spans, skipping escaped dollars, doubled dollars and code.
++pub(super) fn spans(text: &str) -> Vec<Range<usize>> {
++    let bytes = text.as_bytes();
++    let (mut found, mut open, mut ix) = (Vec::new(), None, 0);
++    while ix < bytes.len() {
++        match bytes[ix] {
++            b'\\' => ix += 2,
++            b'`' => {
++                let tick = ix;
++                while ix < bytes.len() && bytes[ix] == b'`' {
++                    ix += 1;
++                }
++                let run = ix - tick;
++                while ix < bytes.len() {
++                    if bytes[ix] == b'`' {
++                        let start = ix;
++                        while ix < bytes.len() && bytes[ix] == b'`' {
++                            ix += 1;
++                        }
++                        if ix - start == run {
++                            break;
++                        }
++                    } else {
++                        ix += 1;
++                    }
++                }
++            }
++            b'$' if ix + 1 < bytes.len() && bytes[ix + 1] == b'$' => ix += 2,
++            b'$' => {
++                match open.take() {
++                    None => open = Some(ix),
++                    Some(start) if ix > start + 1 => found.push(start..ix + 1),
++                    Some(_) => {}
++                }
++                ix += 1;
++            }
++            _ => ix += 1,
++        }
++    }
++    found
++}
++
++/// Which span holds `at`, when it is inside one.
++fn holding(spans: &[Range<usize>], at: usize) -> Option<Range<usize>> {
++    spans
++        .iter()
++        .find(|span| span.start < at && at < span.end)
++        .cloned()
++}
++
++/// A caret inside a formula sits on the nearer end of it.
++pub(super) fn snap_caret(text: &str, at: usize) -> usize {
++    let Some(span) = holding(&spans(text), at) else {
++        return at;
++    };
++    match at - span.start <= span.end - at {
++        true => span.start,
++        false => span.end,
++    }
++}
++
++/// Whether `range` cuts into `span`, including a caret strictly inside it.
++fn touching(span: &Range<usize>, range: &Range<usize>) -> bool {
++    (range.start < span.end && range.end > span.start)
++        || (range.is_empty() && span.start < range.start && range.start < span.end)
++}
++
++/// A typed/pasted `incoming` becomes a whole formula, or is refused.
++fn written(incoming: &str) -> Option<String> {
++    let trimmed = incoming.trim();
++    if trimmed.is_empty() {
++        return Some(String::new());
++    }
++    let inner = trimmed
++        .strip_prefix('$')
++        .and_then(|text| text.strip_suffix('$'))
++        .unwrap_or(trimmed);
++    if green_math::cached(inner).is_err() {
++        return None;
++    }
++    Some(match trimmed.starts_with('$') && trimmed.ends_with('$') {
++        true => trimmed.to_string(),
++        false => format!("${inner}$"),
++    })
++}
++
++/// One block field edit: widen a cut into a formula to the whole formula.
++pub(super) fn edit_in(base: &str, range: Range<usize>, incoming: &str) -> (String, usize) {
++    let plain = || {
++        let mut text = base.to_string();
++        text.replace_range(range.clone(), incoming);
++        (text, range.start + incoming.len())
++    };
++    for span in spans(base) {
++        // A whole formula already covered by the edit needs no widening.
++        if span.start >= range.start && span.end <= range.end {
++            continue;
++        }
++        if !touching(&span, &range) {
++            continue;
++        }
++        let mut text = base.to_string();
++        // One typed character accumulates inside the dollars; a deletion or
++        // a paste takes the whole atom. Both refuse anything the converter
++        // does not know, so an unbalanced `$` never reaches the document.
++        let inside = match incoming.chars().count() {
++            1 => {
++                let body = &base[span.start + 1..span.end - 1];
++                let from = range.start.saturating_sub(span.start + 1).min(body.len());
++                let to = range
++                    .end
++                    .saturating_sub(span.start + 1)
++                    .clamp(from, body.len());
++                let next = format!("{}{}{}", &body[..from], incoming, &body[to..]);
++                match green_math::cached(&next) {
++                    Ok(_) => {
++                        let caret = span.start + 1 + from + incoming.len();
++                        let whole = format!("${next}$");
++                        text.replace_range(span, &whole);
++                        return (text, caret);
++                    }
++                    Err(_) => None,
++                }
++            }
++            _ => written(incoming),
++        };
++        let replacement = match inside {
++            Some(text) => text,
++            None => {
++                log::warn!("documents: an edit inside a formula was refused");
++                return (base.to_string(), span.end);
++            }
++        };
++        text.replace_range(span.clone(), &replacement);
++        let caret = match replacement.is_empty() {
++            true => span.start,
++            false => span.start + replacement.len() - 1,
++        };
++        return (text, caret);
++    }
++    plain()
++}
++
++/// Document-side source edits take the same widening, in visual mode only.
++pub(super) fn expand_edits(
++    text: &str,
++    edits: Vec<(Range<usize>, String)>,
++) -> Vec<(Range<usize>, String)> {
++    let found = spans(text);
++    let mut wide: Vec<(Range<usize>, String)> = Vec::new();
++    for (range, with) in edits {
++        let hit = found.iter().find(|span| {
++            !(span.start >= range.start && span.end <= range.end) && touching(span, &range)
++        });
++        let (range, with) = match hit {
++            None => (range, with),
++            Some(span) => match with.is_empty() {
++                true => (span.clone(), with),
++                false => match written(&with) {
++                    Some(text) => (span.clone(), text),
++                    None => {
++                        log::warn!("documents: a replacement inside a formula was refused");
++                        continue;
++                    }
++                },
++            },
++        };
++        match wide.last_mut() {
++            Some(last) if range.start <= last.0.end => {
++                last.0.end = last.0.end.max(range.end);
++                last.1.push_str(&with);
++            }
++            _ => wide.push((range, with)),
++        }
++    }
++    wide
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn dollars_in_code_and_escapes_are_not_formulas() {
++        assert_eq!(spans("a $x$ ` $y$ ` \\$z b $q$"), vec![2..5, 20..23]);
++    }
++
++    #[test]
++    fn a_cut_inside_widens_and_a_boundary_does_not() {
++        let text = "通 $a_n$ 后";
++        assert_eq!(edit_in(text, 5..6, "").0, "通  后");
++        assert_eq!(edit_in(text, 3..3, "x").0, "通 x$a_n$ 后");
++        assert_eq!(edit_in(text, 8..9, "").0, "通 $a_n$ 后".replace("$a_n$", ""));
++    }
++
++    #[test]
++    fn typing_inside_wraps_and_a_bad_command_is_refused() {
++        let text = "通 $a_n$ 后";
++        assert_eq!(edit_in(text, 5..5, "x").0, "通 $xa_n$ 后");
++        assert_eq!(edit_in(text, 5..5, "\\nope"), ("通 $a_n$ 后".to_string(), 9));
++    }
++
++    #[test]
++    fn a_caret_snap_lands_on_the_nearer_end() {
++        assert_eq!(snap_caret("a $x^2$ b", 5), 7);
++        assert_eq!(snap_caret("a $x^2$ b", 4), 2);
++    }
++}
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/lists.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/lists.rs
+index a41d549..32cf7a9 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/lists.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/lists.rs
+@@ -191,10 +191,9 @@ impl MarkdownDocument {
+         let after = range.start + typed.len();
+         let edit = (range, typed);
+         log::info!("markdown document: a list goes on in source");
+-        self.editor.update(cx, |editor, cx| {
+-            editor.edit([edit], cx);
+-            editor.select(std::iter::once(after..after), cx);
+-        });
++        self.edit_source(vec![edit], cx);
++        self.editor
++            .update(cx, |editor, cx| editor.select(std::iter::once(after..after), cx));
+         true
+     }
+ 
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/mod.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/mod.rs
+index 58a4d17..eb0a723 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/mod.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/mod.rs
+@@ -5,6 +5,7 @@ mod cells;
+ mod edit;
+ mod finding;
+ mod fold;
++mod formula;
+ mod format;
+ mod lists;
+ mod look;
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/tables.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/tables.rs
+index f71861e..f73c1e7 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/tables.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/tables.rs
+@@ -309,10 +309,9 @@ impl MarkdownDocument {
+         let (table, caret) = table_text(&grid, &[AlignKind::None; 3], (0, 0, 0), "", eol);
+         let caret = from + before.len() + caret;
+         log::info!("markdown document: a table goes in");
+-        self.editor.update(cx, |editor, cx| {
+-            editor.edit([(from..end, format!("{before}{table}{after}"))], cx);
+-            editor.select(std::iter::once(caret..caret), cx);
+-        });
++        self.edit_source(vec![(from..end, format!("{before}{table}{after}"))], cx);
++        self.editor
++            .update(cx, |editor, cx| editor.select(std::iter::once(caret..caret), cx));
+         Ok(())
+     }
+ }
+diff --git a/vendor/ely-gpui-components/crates/ely-documents/src/document/visual.rs b/vendor/ely-gpui-components/crates/ely-documents/src/document/visual.rs
+index 0418784..c7b9103 100644
+--- a/vendor/ely-gpui-components/crates/ely-documents/src/document/visual.rs
++++ b/vendor/ely-gpui-components/crates/ely-documents/src/document/visual.rs
+@@ -548,6 +548,28 @@ impl Render for MarkdownDocument {
+                             cx.stop_propagation();
+                             document.commit(cx);
+                             window.focus(&document.focus, cx);
++                            return;
++                        }
++                    }),
++                )
++                .capture_action(cx.listener(|document, _: &forms::Left, _, cx| {
++                    if document.mode == MarkdownMode::Visual && document.cross_formula(false, cx) {
++                        cx.stop_propagation();
++                    }
++                }))
++                .capture_action(cx.listener(|document, _: &forms::Right, _, cx| {
++                    if document.mode == MarkdownMode::Visual && document.cross_formula(true, cx) {
++                        cx.stop_propagation();
++                    }
++                }))
++                .on_mouse_up(
++                    MouseButton::Left,
++                    cx.listener(|document, event: &gpui::MouseUpEvent, _, cx| {
++                        if event.click_count == 2
++                            && document.mode == MarkdownMode::Visual
++                            && document.select_formula(cx)
++                        {
++                            cx.stop_propagation();
+                         }
+                     }),
+                 )

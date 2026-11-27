@@ -191,10 +191,9 @@ impl MarkdownDocument {
         let after = range.start + typed.len();
         let edit = (range, typed);
         log::info!("markdown document: a list goes on in source");
-        self.editor.update(cx, |editor, cx| {
-            editor.edit([edit], cx);
-            editor.select(std::iter::once(after..after), cx);
-        });
+        self.edit_source(vec![edit], cx);
+        self.editor
+            .update(cx, |editor, cx| editor.select(std::iter::once(after..after), cx));
         true
     }
 

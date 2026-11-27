@@ -18,7 +18,8 @@ pub use actions::{
     bind_keys,
 };
 pub use actions::{Copy, Cut, Paste, SelectAll};
-pub(crate) use actions::{Left, Right};
+#[doc(hidden)]
+pub use actions::{Left, Right};
 use edit::Snapshot;
 pub use edit::{History, from_utf16, to_utf16};
 pub use highlight::Highlight;
