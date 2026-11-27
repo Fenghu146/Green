@@ -28,7 +28,7 @@
 
 ## 自带字体
 
-`Contents/MacOS/fonts/` 随包：Noto Sans CJK SC Regular/Bold、Noto Sans Math、Noto Sans Mono
+`Contents/Resources/fonts/` 随包：Noto Sans CJK SC Regular/Bold、Noto Sans Math、Noto Sans Mono
 （SIL OFL 1.1）。编辑器与 PDF 导出用同一批文件，不依赖系统里装了什么字体。
 
 ## 许可

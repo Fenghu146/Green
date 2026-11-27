@@ -25,16 +25,26 @@ const FILES: [&str; 4] = [
 /// A build from source keeps the files in the repository.
 const DEV: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts");
 
-/// `fonts/` beside the executable, else the source tree's.
+/// `fonts/` beside the executable, else a macOS bundle's `Resources/fonts`,
+/// else the source tree's.
 pub fn dir() -> PathBuf {
-    match std::env::current_exe()
+    let beside = std::env::current_exe()
         .ok()
-        .and_then(|exe| Some(exe.parent()?.join("fonts")))
-        .filter(|beside| beside.is_dir())
-    {
-        Some(beside) => beside,
-        None => PathBuf::from(DEV),
+        .and_then(|exe| Some(exe.parent()?.join("fonts")));
+    if let Some(beside) = beside.filter(|beside| beside.is_dir()) {
+        return beside;
     }
+    // Inside a bundle everything under `Contents/MacOS` is nested code to
+    // `codesign`, and fonts are not code, so they live one level over.
+    #[cfg(target_os = "macos")]
+    if let Some(resources) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.parent()?.join("Resources/fonts")))
+        .filter(|resources| resources.is_dir())
+    {
+        return resources;
+    }
+    PathBuf::from(DEV)
 }
 
 /// The files' bytes, in `FILES` order.

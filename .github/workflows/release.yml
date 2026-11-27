@@ -152,16 +152,16 @@ jobs:
           set -euo pipefail
           app="$RUNNER_TEMP/Green.app"
           rm -rf "$app" "$OUT"
-          mkdir -p "$app/Contents/MacOS/fonts" "$app/Contents/Resources/LICENSES" "$OUT"
+          mkdir -p "$app/Contents/Resources/fonts" "$app/Contents/Resources/LICENSES" "$OUT"
           cp "target/$TARGET/release/green" "$app/Contents/MacOS/green"
           strip -x "$app/Contents/MacOS/green"
           # Editing a Mach-O drops its signature, and arm64 macOS runs nothing
           # unsigned. An ad-hoc one costs nothing and needs no account; a
           # Developer ID is what this release does not have.
           codesign --force --sign - "$app/Contents/MacOS/green"
-          # The bundle's fonts sit beside the executable: that is where
-          # `fonts::dir()` looks first.
-          cp assets/fonts/*.otf assets/fonts/*.ttf assets/fonts/OFL-*.txt "$app/Contents/MacOS/fonts/"
+          # Resources, not MacOS: `codesign` reads anything else under
+          # Contents/MacOS as nested code, and a font is not code.
+          cp assets/fonts/*.otf assets/fonts/*.ttf assets/fonts/OFL-*.txt "$app/Contents/Resources/fonts/"
           sed "s/@VERSION@/$VERSION/g" packaging/macos/Info.plist >"$app/Contents/Info.plist"
           cp LICENSE THIRD-PARTY-NOTICES.txt "$app/Contents/Resources/"
           cp LICENSES/*.txt "$app/Contents/Resources/LICENSES/"
@@ -173,7 +173,19 @@ jobs:
             sips -z "$((size * 2))" "$((size * 2))" assets/icons/green.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
           done
           iconutil -c icns "$iconset" -o "$app/Contents/Resources/icon.icns"
-          "$app/Contents/MacOS/green" --capture "$OUT/smoke-${{ matrix.name }}.png" --theme light --wait-ms 4000 "$GITHUB_WORKSPACE/$SMOKE_DOC"
+          # `--capture` reads a frame back only on Windows (DirectX); macOS
+          # and Linux bail with "render_to_image not implemented". So the
+          # proof here is the packaged binary reaching its first frame, plus a
+          # picture of the window for a human to look at.
+          ELY_SMOKE=1 "$app/Contents/MacOS/green" "$GITHUB_WORKSPACE/$SMOKE_DOC" 2>&1 | tee "$RUNNER_TEMP/smoke.log"
+          grep -q 'ready Green' "$RUNNER_TEMP/smoke.log"
+          grep -q 'opened 6.2.md as tab 0' "$RUNNER_TEMP/smoke.log"
+          "$app/Contents/MacOS/green" "$GITHUB_WORKSPACE/$SMOKE_DOC" >/dev/null 2>&1 &
+          pid=$!
+          sleep 12
+          screencapture -x "$OUT/smoke-${{ matrix.name }}.png"
+          kill "$pid" || true
+          wait "$pid" 2>/dev/null || true
           # Last, once Contents/ is complete, so the bundle's own seal covers it.
           codesign --force --sign - "$app"
           codesign --verify --verbose "$app"
@@ -292,9 +304,9 @@ jobs:
 
           ## 已知缺口
 
-          - **macOS 只验证了构建，没有在真机上验证运行**（Linux 与 Windows 都实跑过并生成了渲染截图）。
-          - Linux 上 `--capture` 不可用（gpui 的 Linux 后端没有帧读回），发行验证改用 Xvfb 下的真实窗口截图。
-          - 未签名、无自动更新、无安装器。
+          - **macOS arm64 在虚拟机上实跑通过；macOS x86_64 只验证了构建**，没有在 Intel 真机上跑过。
+          - `--capture`（离屏截图）只在 Windows 上可用；macOS 与 Linux 的发行验证改用真实窗口截图。
+          - 没有代码签名（macOS 只是 ad-hoc 签名，所以 Gatekeeper 仍会拦），没有自动更新，没有安装器。
           NOTES
           echo "notes written" >>"$GITHUB_STEP_SUMMARY"
       - name: Create the release
