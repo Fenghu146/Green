@@ -222,6 +222,12 @@ jobs:
           for volume in /Volumes/Green "/Volumes/Green "[0-9]*; do
             [ -d "$volume" ] && hdiutil detach "$volume" || true
           done
+          # hdiutil copies the bundle once more before compressing it, and a
+          # release target tree is most of the runner's disk. Deps and build
+          # output go; the directory stays, so the cache step still finds it.
+          df -h /
+          rm -rf target/release/deps target/release/build
+          df -h /
           hdiutil create -volname "Green $VERSION" -srcfolder "$dmgroot" -ov -format UDZO \
             "$OUT/Green-$VERSION-$ARCH.dmg"
       - name: Package (Linux)
@@ -253,20 +259,34 @@ jobs:
         run: |
           set -euo pipefail
           installer="$OUT/Green-$VERSION-x64-setup.exe"
-          # Per-user and silent: no UAC, no prompt, no desktop.
-          "$installer" /S
+          # Per-user and silent: no UAC, no prompt, no desktop. Git Bash
+          # rewrites an argument that starts with "/" into a Windows path, so
+          # /S has to be passed through untouched or NSIS shows its wizard and
+          # waits for a click that never comes.
+          MSYS2_ARG_CONV_EXCL='*' "$installer" /S
           installed="$LOCALAPPDATA/Programs/Green"
           for _ in $(seq 30); do
             [ -f "$installed/green.exe" ] && break
             sleep 1
           done
           [ -f "$installed/green.exe" ] || { echo "::error::the installer left no green.exe in $installed"; exit 1; }
-          "$installed/green.exe" --capture "$OUT/smoke-${{ matrix.name }}.png" --theme light --wait-ms 4000 "$GITHUB_WORKSPACE/$SMOKE_DOC"
+          "$installed/green.exe" --capture "$OUT/smoke-${{ matrix.name }}.png" --theme light --wait-ms 4000 "$GITHUB_WORKSPACE/$SMOKE_DOC" 2>&1 | tee "$RUNNER_TEMP/smoke.log"
           ls -l "$OUT/smoke-${{ matrix.name }}.png"
+          # The app falls back to the source tree's fonts when the installed
+          # copy has none, so a green smoke proves nothing on its own: this
+          # line has to exist, and it must not name that fallback.
+          grep -q 'fonts: 4 files from' "$RUNNER_TEMP/smoke.log" || {
+            echo "::error::no font log line; the smoke cannot tell where fonts came from"
+            exit 1
+          }
+          if grep 'fonts: 4 files from' "$RUNNER_TEMP/smoke.log" | grep -q 'assets/fonts'; then
+            echo "::error::the installed copy fell back to the source tree's fonts; the installer did not carry them"
+            exit 1
+          fi
           # 1.0.0 associates nothing: HKCU\Software\Classes stays untouched.
           powershell -NoProfile -Command "if (Test-Path 'HKCU:\Software\Classes\Green.Markdown') { Write-Error 'wrote a file association'; exit 1 }"
           # And the uninstaller takes back everything it did write.
-          "$installed/Uninstall.exe" /S
+          MSYS2_ARG_CONV_EXCL='*' "$installed/Uninstall.exe" /S
           for _ in $(seq 30); do
             [ -d "$installed" ] || break
             sleep 1
@@ -303,6 +323,15 @@ jobs:
           ELY_SMOKE=1 "$app" "$GITHUB_WORKSPACE/$SMOKE_DOC" 2>&1 | tee "$RUNNER_TEMP/smoke.log"
           grep -q 'ready Green' "$RUNNER_TEMP/smoke.log"
           grep -q 'opened 6.2.md as tab 0' "$RUNNER_TEMP/smoke.log"
+          # The source-tree fallback would hide a dmg without fonts.
+          grep -q 'fonts: 4 files from' "$RUNNER_TEMP/smoke.log" || {
+            echo "::error::no font log line; the smoke cannot tell where fonts came from"
+            exit 1
+          }
+          if grep 'fonts: 4 files from' "$RUNNER_TEMP/smoke.log" | grep -q 'assets/fonts'; then
+            echo "::error::the dmg's copy fell back to the source tree's fonts; the bundle did not carry them"
+            exit 1
+          fi
           "$app" "$GITHUB_WORKSPACE/$SMOKE_DOC" >/dev/null 2>&1 &
           pid=$!
           sleep 12
@@ -323,7 +352,15 @@ jobs:
           cd "$unpack/Green-$VERSION-linux-x64"
           # `--capture` has no frame readback here either, so the proof is the
           # unpacked binary drawing a real window under X11.
-          ELY_SMOKE=1 xvfb-run -a -s "-screen 0 1400x900x24" ./green "$GITHUB_WORKSPACE/$SMOKE_DOC"
+          ELY_SMOKE=1 xvfb-run -a -s "-screen 0 1400x900x24" ./green "$GITHUB_WORKSPACE/$SMOKE_DOC" 2>&1 | tee "$RUNNER_TEMP/smoke.log"
+          grep -q 'fonts: 4 files from' "$RUNNER_TEMP/smoke.log" || {
+            echo "::error::no font log line; the smoke cannot tell where fonts came from"
+            exit 1
+          }
+          if grep 'fonts: 4 files from' "$RUNNER_TEMP/smoke.log" | grep -q 'assets/fonts'; then
+            echo "::error::the tarball's copy fell back to the source tree's fonts; the archive did not carry them"
+            exit 1
+          fi
           xvfb-run -a -s "-screen 0 1400x900x24" bash -c "./green '$GITHUB_WORKSPACE/$SMOKE_DOC' >run.log 2>&1 & pid=\$!; sleep 12; import -window root '$OUT/smoke-${{ matrix.name }}.png'; kill \$pid || true" || true
           grep -q 'opened 6.2.md as tab 0' run.log
           colours=$(identify -format '%k' "$OUT/smoke-${{ matrix.name }}.png")
