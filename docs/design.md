@@ -98,14 +98,15 @@ S2 的证据（缺一项即未完成）：5 万字 K2P p50/p95/p99、>16 ms 占�
 
 ### 1.4 体积预算（80–100 MB）
 
-| 项 | 估 |
+| 项 | 估 / 实测 |
 | --- | --- |
-| release exe（基座） | 40.6 MB（实测） |
-| Typst 库（typst/typst-svg/typst-pdf + 依赖） | ~10–15 MB |
+| release exe（同一基线 `dd79c38`，未链 `typst-pdf`） | 74,099,712 B（74.10 MB / 70.66 MiB，实测） |
+| Typst PDF 链（相对该基线的增量） | 3,475,968 B（3.48 MB / 3.31 MiB，实测；目标 ≤ 20 MB） |
 | 中文字体 2 个字重（OFL） | ~30–34 MB |
 | 数学字体 + 拉丁字体（OFL/Apache） | ~2 MB |
 | 图标/本地化/杂项 | ~2 MB |
-| 合计 | **~85–93 MB** |
+
+2026-11-27 实测：两个 release exe 从同一提交分别构建到独立 `CARGO_TARGET_DIR`，74,099,712 → 77,575,680 B。早期记的 40.6 MB 是更早阶段的基座，不与本次增量混算；`typst`/`typst-svg` 已随 S2b 在基线里，这里新增的只是 `typst-pdf`/krilla 一条链。
 
 ### 1.5 平台（v1 仅 Windows）
 
@@ -279,7 +280,9 @@ export pdf: pages=12 bytes=845120 fonts=[{"name":"SourceHanSansSC","bytes":41200
 阈值：单页均值 > 500 KB、单字体 > 3 MB、图片占比 > 70%、任一图片覆盖页面积 > 40% → 日志 + 状态栏。
 验收：用户 `作业.md` **≤ 2 MB**、导出 ≤ 10 s、`compressed=true`、`max_image_coverage ≈ 0`、`pdffonts` 全 `sub=yes`，且 `pdffonts` 里每个字体都来自 `assets/fonts/`（出现别的字体即字体漂移，比体积超限更严重）。
 
-**发布阻断项（v1.0 前必须完成）：导出改走 Typst 库。** 现在 app 通过 `typst` 可执行文件导出（`GREEN_TYPST` → exe 旁 → PATH），这是过渡：便携包不带 52 MB 的 CLI，而且"exe 在哪、版本对不对"不该变成用户的问题——离线机器点导出必须能出 PDF。切到 `typst`/`typst-pdf` 库（增量 10–15 MB，见 §1.4 体积预算）后删掉 CLI 这条路。切库之前，找不到 typst 时导出必须明确报错并说明三种办法，不得静默失败。
+**导出已改走 Typst 库（原发布阻断项已解除）。** 便携包不带 52 MB 的 CLI；app 固定用 `green_export::Lib` 进程内 `typst::compile` + `typst_pdf::pdf`，字体只来自随包 `fonts/`，没有任何环境变量或开关能切回可执行文件。没有 `typst.exe` 也能导出，不静默降级、也不再报"找不到 typst"。`Cli` 后端仅用于与官方 CLI 逐字节对比，不参与产品导出路径。
+
+库路径**有意不写 PDF 时间戳**：`PdfOptions::timestamp = None`，所以同一份输入导出两次得到逐字节相同的文件（便于快照、diff 与版本管理）。CLI 默认会写 `/Info` 与 XMP 的 `CreationDate`/`ModDate`，因此同一文档的两条路径相差 185 B；这不是缺陷，也不作为对齐目标。若将来确有阅读器要求时间戳，应做成默认关闭的显式开关。
 
 ## 8. 界面（按 ima 骨架，去掉 AI）
 

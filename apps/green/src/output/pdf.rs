@@ -1,5 +1,5 @@
-//! Markdown as a PDF: the document's blocks through `green-export`, compiled by
-//! the Typst executable (design §7).
+//! Markdown as a PDF: the document's blocks through `green-export`, compiled
+//! in process (design §7).
 //!
 //! The tree the editor draws is mapped block for block onto the export's own
 //! `Block`, so the PDF holds what the screen holds; front matter is metadata and
@@ -7,18 +7,13 @@
 //! picture that cannot be carried is left out and said, as the HTML export says
 //! it.
 
-use std::{
-    env,
-    fs,
-    io,
-    path::{Path, PathBuf},
-};
+use std::{fs, io, path::Path};
 
 use base64::Engine as _;
 use ely_gpui_component::documents::{
     AlertKind, AlignKind, Inline, MarkdownBlock, MarkdownReader, Style, alert, markdown_tree, mdast,
 };
-use green_export::{Align, Block, Cli, Inline as Exported, Item, Style as ExportedStyle};
+use green_export::{Align, Block, Inline as Exported, Item, Style as ExportedStyle};
 
 use super::{
     Page, Pictures,
@@ -44,7 +39,7 @@ pub fn write(text: &str, path: &Path, beside: Option<&Path>, work: &Path, alerts
     let blocks = blocks_of(&nodes, &mut carried)?;
     page.missing.append(&mut carried.missing);
     let fonts = ely_ui::fonts::dir();
-    let compiler = Cli::new(typst()?, &fonts, &folder);
+    let compiler = green_export::Lib::new(&fonts, &folder).map_err(io::Error::other)?;
     let export = green_export::export(&blocks, path, &compiler, &fonts).map_err(io::Error::other)?;
     // Characters no bundled face draws print as tofu: say which, and where.
     page.missing.extend(export.missing.iter().map(|missing| missing.describe()));
@@ -86,34 +81,6 @@ fn nodes_of(text: &str) -> Vec<MarkdownBlock> {
         }
     }
     nodes
-}
-
-/// The `typst` executable: `GREEN_TYPST`, beside the program, else `PATH`.
-fn typst() -> io::Result<PathBuf> {
-    if let Some(path) = env::var_os("GREEN_TYPST") {
-        return Ok(PathBuf::from(path));
-    }
-    let name = if cfg!(windows) { "typst.exe" } else { "typst" };
-    if let Some(beside) = env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
-        .filter(|beside| beside.is_file())
-    {
-        return Ok(beside);
-    }
-    let path = env::var_os("PATH").unwrap_or_default();
-    for dir in env::split_paths(&path) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    Err(ely_ipc::Worded::error(
-        io::ErrorKind::NotFound,
-        // Deleted with this CLI path once the export compiles Typst in-process.
-        "mark.export.no_typst",
-        &[],
-    ))
 }
 
 /// Where the export's pictures go, and which ones it could not carry.
