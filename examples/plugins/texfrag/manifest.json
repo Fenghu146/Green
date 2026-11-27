@@ -1,0 +1,11 @@
+{
+  "id": "texfrag",
+  "name": "LaTeX fragments",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "extensions": [".texfrag"],
+  "command": ["python", "texfrag_plugin.py"],
+  "timeoutMs": 8000,
+  "enabled": true,
+  "capabilities": ["blocks@1"]
+}

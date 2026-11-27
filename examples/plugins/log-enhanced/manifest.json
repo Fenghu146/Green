@@ -1,0 +1,11 @@
+{
+  "id": "0log-enhanced",
+  "name": "Log (enhanced)",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "extensions": [".log"],
+  "command": ["node", "log_enhanced_plugin.js"],
+  "timeoutMs": 8000,
+  "enabled": true,
+  "capabilities": ["blocks@1"]
+}
