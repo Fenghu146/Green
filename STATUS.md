@@ -23,6 +23,9 @@
 - 构建缺口只有一个：Linux 的系统库（`libdbus-1-dev` 等，清单在 `packaging/linux/README-portable.txt`）。首次失败的真因是 `keyring` → `libdbus-sys`，不是 gpui。
 - **glibc 下限**：发行包在 `ubuntu-22.04` 上构建（glibc 2.35），不用 `ubuntu-latest`（已是 26.04 / glibc 2.41）。
 - 发行流程：`.github/workflows/release.yml`，tag `v*` 发布、`workflow_dispatch` 只演练不发布；试验用的 `release-trial.yml` 已并入它的 dispatch 模式并删除。
+- **排练已跑通**：run `45945920216`（分支 `release-workflow`）四格全绿，`publish` 按设计跳过（非 tag）。产物：windows zip 55,977,896 B、macos-aarch64 zip 55,168,123 B、macos-x86_64 zip 57,283,764 B、linux tar.gz 65,790,720 B；四张 smoke 图均生成。Linux 包最高符号版本 `GLIBC_2.35`（objdump 实测，与 ubuntu-22.04 构建机一致）。
+- `release.yml` 里的 `push: branches: [release-workflow]` 只是权宜：GitHub 只能 dispatch 默认分支上已有的工作流。合并到 main 时删掉这一行，之后用 dispatch 排练。
+- **`publish` 这一段从未执行过**（要 tag 才会跑）：tag 前必须先在 main 上 dispatch 一次确认四格仍绿。
 
 ## 工作规矩
 
