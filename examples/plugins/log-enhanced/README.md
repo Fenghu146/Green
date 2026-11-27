@@ -5,7 +5,7 @@ warn K 条`), then one table per level group — error (`ERROR`/`FATAL`), warn
 (`WARN`/`WARNING`), and the rest — separated by rules. `FATAL` counts as an
 error; lines without a level go into the last group with `—` in the time and
 level columns. Node 18 or newer on `PATH`, no packages. `apiVersion: 1`,
-`timeoutMs: 8000`.
+`timeoutMs: 20000`.
 
 ## Edge cases
 

@@ -1,4 +1,5 @@
-//! The shipped examples must declare a timeout that covers interpreter startup.
+//! The shipped examples must declare a timeout that covers interpreter startup,
+//! and their READMEs must not quote a different number from the manifest.
 //! A missing field silently takes the host default (8 s), which is too close
 //! to the 7.47 s cold start observed on windows-latest.
 
@@ -16,6 +17,25 @@ fn interpreter(command: &str) -> bool {
         name.as_str(),
         "python" | "python3" | "python.exe" | "python3.exe" | "node" | "node.exe"
     )
+}
+
+/// Only `timeoutMs: N` and `"timeoutMs": N` count; prose such as
+/// "defaults to 8000" is deliberately ignored.
+fn quoted_timeouts(readme: &str) -> Vec<u64> {
+    let mut found = Vec::new();
+    for needle in ["timeoutMs:", "\"timeoutMs\":"] {
+        for (at, _) in readme.match_indices(needle) {
+            let digits: String = readme[at + needle.len()..]
+                .trim_start()
+                .chars()
+                .take_while(|ch| ch.is_ascii_digit())
+                .collect();
+            if let Ok(value) = digits.parse() {
+                found.push(value);
+            }
+        }
+    }
+    found
 }
 
 #[test]
@@ -45,6 +65,20 @@ fn shipped_interpreter_plugins_declare_a_generous_timeout() {
             "{}: interpreter plugin {command:?} needs an explicit timeoutMs >= {MIN_TIMEOUT_MS} ms, found {timeout:?}; windows-latest cold starts reach 7.47 s",
             path.display()
         );
+
+        let readme = folder.join("README.md");
+        if readme.is_file() {
+            let text = fs::read_to_string(&readme).expect("README.md");
+            for quoted in quoted_timeouts(&text) {
+                assert_eq!(
+                    quoted,
+                    timeout.expect("a valid timeout above"),
+                    "{}: README says timeoutMs {quoted}, but {} says {timeout:?}",
+                    readme.display(),
+                    path.display()
+                );
+            }
+        }
     }
     assert!(
         checked > 0,
