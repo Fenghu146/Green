@@ -59,6 +59,7 @@ jobs:
             libwayland-dev wayland-protocols \
             libx11-xcb-dev libxcb1-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xkb-dev \
             libfontconfig1-dev libfreetype-dev \
+            libdbus-1-dev \
             libgl1-mesa-dev libegl1-mesa-dev
 
       - name: cargo build -p green --release --locked
