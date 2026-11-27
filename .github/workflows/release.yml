@@ -1,0 +1,309 @@
+name: release
+
+# A tag builds, packages and publishes; a dispatch rehearsal does everything
+# except publish, so the first release is proven on a branch rather than on a
+# tag that cannot be moved.
+on:
+  push:
+    tags: ['v*']
+    # GitHub only dispatches a workflow that exists on the default branch.
+    # Until this file lands there, pushing the rehearsal branch starts it;
+    # this line goes away with that merge.
+    branches: [release-workflow]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  # The document every packaged binary has to render before it may ship.
+  SMOKE_DOC: fixtures/real/skeletons/6.2.md
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # A pushed tag cannot be corrected, so the mismatch has to stop the run
+      # before anything is built, and before anything is published.
+      - name: Read Cargo.toml's version, and hold a tag to it
+        id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
+          [ -n "$version" ] || { echo "::error::Cargo.toml has no workspace version"; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "Cargo.toml: \`$version\`" >>"$GITHUB_STEP_SUMMARY"
+          ref=${GITHUB_REF_NAME}
+          case $ref in
+            v*)
+              if [ "${ref#v}" != "$version" ]; then
+                echo "::error::tag $ref is not Cargo.toml's $version; a pushed tag cannot be changed, so this run stops before building"
+                exit 1
+              fi
+              echo "tag: \`$ref\` matches, so this run publishes" >>"$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "dispatch on \`$ref\`: a rehearsal, so nothing is published" >>"$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+
+  build:
+    name: ${{ matrix.name }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            family: windows
+            asset: green-windows-x86_64.zip
+          # Both Apple silicons: an arm-only zip would leave Intel Macs out,
+          # and a link failure there has to be seen, not skipped.
+          - name: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            family: macos
+            asset: green-macos-aarch64.zip
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            family: macos
+            asset: green-macos-x86_64.zip
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            family: linux
+            asset: green-linux-x86_64.tar.gz
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      OUT: ${{ github.workspace }}/out
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+          cache-on-failure: true
+      - name: Install the target
+        shell: bash
+        run: rustup target add "$TARGET"
+      - name: Linux build dependencies
+        if: matrix.family == 'linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev wayland-protocols \
+            libx11-xcb-dev libxcb1-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xkb-dev \
+            libfontconfig1-dev libdbus-1-dev \
+            libgl1-mesa-dev libegl1-mesa-dev \
+            xvfb imagemagick
+      # `capture` is a shipped feature, not a test one: the package below is
+      # the binary this job runs, so what it proves is what ships. It needs
+      # gpui's test-support, which is why the release binary carries it.
+      - name: Build
+        shell: bash
+        run: cargo build -p green --release --locked --features capture --target "$TARGET"
+      - name: Package (Windows)
+        if: matrix.family == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist=green-windows-x86_64
+          stage="$RUNNER_TEMP/$dist"
+          rm -rf "$stage" "$OUT"
+          mkdir -p "$stage/fonts" "$stage/data" "$stage/LICENSES" "$OUT"
+          cp "target/$TARGET/release/green.exe" "$stage/"
+          cp assets/fonts/*.otf assets/fonts/*.ttf assets/fonts/OFL-*.txt "$stage/fonts/"
+          # An empty `data` beside the exe is what makes this copy portable.
+          cp packaging/windows/data-readme.txt "$stage/data/README.txt"
+          cp packaging/windows/README-portable.txt "$stage/README.txt"
+          cp LICENSE THIRD-PARTY-NOTICES.txt "$stage/"
+          cp LICENSES/*.txt "$stage/LICENSES/"
+          cd "$stage"
+          ./green.exe --capture "$OUT/smoke-${{ matrix.name }}.png" --theme light --wait-ms 4000 "$GITHUB_WORKSPACE/$SMOKE_DOC"
+          cd "$RUNNER_TEMP"
+          if command -v 7z >/dev/null 2>&1; then
+            7z a -tzip "$OUT/$dist.zip" "$dist" >/dev/null
+          else
+            tar -a -c -f "$OUT/$dist.zip" "$dist"
+          fi
+          ls -l "$OUT"
+      - name: Package (macOS)
+        if: matrix.family == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/Green.app"
+          rm -rf "$app" "$OUT"
+          mkdir -p "$app/Contents/MacOS/fonts" "$app/Contents/Resources/LICENSES" "$OUT"
+          cp "target/$TARGET/release/green" "$app/Contents/MacOS/green"
+          strip -x "$app/Contents/MacOS/green"
+          # Editing a Mach-O drops its signature, and arm64 macOS runs nothing
+          # unsigned. An ad-hoc one costs nothing and needs no account; a
+          # Developer ID is what this release does not have.
+          codesign --force --sign - "$app/Contents/MacOS/green"
+          # The bundle's fonts sit beside the executable: that is where
+          # `fonts::dir()` looks first.
+          cp assets/fonts/*.otf assets/fonts/*.ttf assets/fonts/OFL-*.txt "$app/Contents/MacOS/fonts/"
+          sed "s/@VERSION@/$VERSION/g" packaging/macos/Info.plist >"$app/Contents/Info.plist"
+          cp LICENSE THIRD-PARTY-NOTICES.txt "$app/Contents/Resources/"
+          cp LICENSES/*.txt "$app/Contents/Resources/LICENSES/"
+          iconset="$RUNNER_TEMP/Green.iconset"
+          rm -rf "$iconset"
+          mkdir -p "$iconset"
+          for size in 16 32 128 256 512; do
+            sips -z "$size" "$size" assets/icons/green.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
+            sips -z "$((size * 2))" "$((size * 2))" assets/icons/green.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          iconutil -c icns "$iconset" -o "$app/Contents/Resources/icon.icns"
+          "$app/Contents/MacOS/green" --capture "$OUT/smoke-${{ matrix.name }}.png" --theme light --wait-ms 4000 "$GITHUB_WORKSPACE/$SMOKE_DOC"
+          # Last, once Contents/ is complete, so the bundle's own seal covers it.
+          codesign --force --sign - "$app"
+          codesign --verify --verbose "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$OUT/${{ matrix.asset }}"
+          ls -l "$OUT"
+      - name: Package (Linux)
+        if: matrix.family == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist=green-linux-x86_64
+          stage="$RUNNER_TEMP/$dist"
+          rm -rf "$stage" "$OUT"
+          mkdir -p "$stage/fonts" "$stage/LICENSES" "$OUT"
+          cp "target/$TARGET/release/green" "$stage/green"
+          strip --strip-unneeded "$stage/green"
+          cp assets/fonts/*.otf assets/fonts/*.ttf assets/fonts/OFL-*.txt "$stage/fonts/"
+          cp packaging/linux/README-portable.txt "$stage/README.txt"
+          bash packaging/linux/package.sh --desktop green >"$stage/green.desktop"
+          cp assets/icons/green.png "$stage/green.png"
+          cp LICENSE THIRD-PARTY-NOTICES.txt "$stage/"
+          cp LICENSES/*.txt "$stage/LICENSES/"
+          cd "$stage"
+          # `--capture` needs a readback gpui's Linux backend does not have
+          # ("render_to_image not implemented for this platform", exit 3), so
+          # the proof here is the packaged binary drawing a real window.
+          ELY_SMOKE=1 xvfb-run -a -s "-screen 0 1400x900x24" ./green "$GITHUB_WORKSPACE/$SMOKE_DOC"
+          xvfb-run -a -s "-screen 0 1400x900x24" bash -c "./green '$GITHUB_WORKSPACE/$SMOKE_DOC' >run.log 2>&1 & pid=\$!; sleep 12; import -window root '$OUT/smoke-${{ matrix.name }}.png'; kill \$pid || true" || true
+          grep -q 'opened 6.2.md as tab 0' run.log
+          rm -f run.log
+          colours=$(identify -format '%k' "$OUT/smoke-${{ matrix.name }}.png")
+          [ "$colours" -gt 16 ] || { echo "::error::the Linux frame is blank ($colours colours)"; exit 1; }
+          echo "linux smoke: $colours colours in the frame" >>"$GITHUB_STEP_SUMMARY"
+          cd "$RUNNER_TEMP"
+          tar -czf "$OUT/$dist.tar.gz" "$dist"
+          ls -l "$OUT"
+      - name: Checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$OUT"
+          files=$(ls green-*.zip green-*.tar.gz 2>/dev/null || true)
+          [ -n "$files" ] || { echo "::error::no package was written to $OUT"; exit 1; }
+          sha256sum $files | tee "SHA256SUMS-${{ matrix.name }}.txt"
+          cat "SHA256SUMS-${{ matrix.name }}.txt" >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.name }}
+          path: |
+            out/green-*.zip
+            out/green-*.tar.gz
+            out/SHA256SUMS-*.txt
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.name }}
+          path: out/smoke-${{ matrix.name }}.png
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: [version, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: One checksum file for every asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -l
+          sha256sum green-*.zip green-*.tar.gz | sort -k2 >SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >notes.md <<'NOTES'
+          Green 是一个离线 Markdown 笔记应用：内容只存在磁盘上的 `.md` 文件里，没有数据库、没有自有格式。
+
+          ## 下载
+
+          | 平台 | 文件 | 说明 |
+          | --- | --- | --- |
+          | Windows 10/11 x64 | `green-windows-x86_64.zip` | 解压即用，双击 `green.exe` |
+          | macOS（Apple 芯片） | `green-macos-aarch64.zip` | 解压得到 `Green.app` |
+          | macOS（Intel） | `green-macos-x86_64.zip` | 同上 |
+          | Linux x64 | `green-linux-x86_64.tar.gz` | glibc 2.35+，见 `README.txt` |
+
+          每个包都带 `fonts/`、`LICENSE`、`THIRD-PARTY-NOTICES.txt` 与 `LICENSES/`；全部资产的
+          SHA-256 见 `SHA256SUMS.txt`。
+
+          ## 没有签名：系统会拦一次
+
+          **Windows**：第一次运行 `green.exe` 会弹 SmartScreen，点“更多信息 → 仍要运行”。不写注册表，
+          不需要安装器；`data\` 文件夹让这一份成为便携副本（设置、会话、日志都在 `data\green\` 下）。
+
+          **macOS**：这个包**没有签名**（Apple 开发者账号 99 美元一年，个人项目不买）。Gatekeeper 会拦住
+          第一次打开，两种做法任选：
+
+          - 右键（或按住 Control）点 `Green.app` → **打开** → 再点“打开”；
+          - 或者打开终端，清掉隔离属性后再双击：
+
+            ```sh
+            xattr -d com.apple.quarantine Green.app
+            ```
+
+          提示“已损坏”也是同一件事，同样处理。macOS 版数据在 `~/Library/Application Support/Green/green/`。
+
+          ## 已知缺口
+
+          - **macOS 只验证了构建，没有在真机上验证运行**（Linux 与 Windows 都实跑过并生成了渲染截图）。
+          - Linux 上 `--capture` 不可用（gpui 的 Linux 后端没有帧读回），发行验证改用 Xvfb 下的真实窗口截图。
+          - 未签名、无自动更新、无安装器。
+          NOTES
+          echo "notes written" >>"$GITHUB_STEP_SUMMARY"
+      - name: Create the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Green ${{ needs.version.outputs.version }}" \
+            --notes-file notes.md \
+            dist/green-*.zip dist/green-*.tar.gz dist/SHA256SUMS*.txt dist/smoke-*.png
