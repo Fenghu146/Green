@@ -2,13 +2,19 @@
 
 use std::path::PathBuf;
 
-use ely_gpui_component::documents::{
-    DocumentEvent, EditRefusal, LARGEST_READ, MarkdownDocument, MarkdownMode, OutlineHeading,
+use std::ops::Range;
+
+use ely_gpui_component::{
+    documents::{
+        DocumentEvent, EditRefusal, LARGEST_READ, MarkdownDocument, MarkdownMode, OutlineHeading,
+    },
+    forms::TextInput,
+    overlays::PromptDialog,
 };
 use gpui::{
-    AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable as _,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, Styled as _,
-    Window, div,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable as _,
+    InteractiveElement as _, IntoElement, MouseButton, MouseUpEvent, ParentElement as _, Render,
+    Styled as _, Window, div,
 };
 
 use crate::engine::{Doc, mark};
@@ -86,7 +92,53 @@ pub struct MarkView {
     wheel: f32,
     /// The last right-click menu asked.
     offer: Option<ely_ui::menu::Offer<menu::Asked>>,
+    /// A formula's source span, held from the press to the next frame.
+    formula_pending: Option<Range<usize>>,
+    /// A formula's source span and its small editor, when open.
+    formula: Option<(Range<usize>, Entity<TextInput>)>,
     pub focus: FocusHandle,
+}
+
+/// Single-dollar spans, read from the source as the document's guard reads them.
+fn formula_spans(text: &str) -> Vec<Range<usize>> {
+    let bytes = text.as_bytes();
+    let (mut found, mut open, mut ix) = (Vec::new(), None, 0);
+    while ix < bytes.len() {
+        match bytes[ix] {
+            b'\\' => ix += 2,
+            b'`' => {
+                let start = ix;
+                while ix < bytes.len() && bytes[ix] == b'`' {
+                    ix += 1;
+                }
+                let run = ix - start;
+                while ix < bytes.len() {
+                    if bytes[ix] == b'`' {
+                        let at = ix;
+                        while ix < bytes.len() && bytes[ix] == b'`' {
+                            ix += 1;
+                        }
+                        if ix - at == run {
+                            break;
+                        }
+                    } else {
+                        ix += 1;
+                    }
+                }
+            }
+            b'$' if ix + 1 < bytes.len() && bytes[ix + 1] == b'$' => ix += 2,
+            b'$' => {
+                match open.take() {
+                    None => open = Some(ix),
+                    Some(start) if ix > start + 1 => found.push(start..ix + 1),
+                    Some(_) => {}
+                }
+                ix += 1;
+            }
+            _ => ix += 1,
+        }
+    }
+    found
 }
 
 impl EventEmitter<Reported> for MarkView {}
@@ -134,6 +186,8 @@ impl MarkView {
             shown: false,
             wheel: 0.0,
             offer: None,
+            formula_pending: None,
+            formula: None,
             focus,
         }
     }
@@ -344,6 +398,104 @@ impl MarkView {
     }
 }
 
+impl MarkView {
+    /// The formula the caret sits on, in source bytes.
+    fn formula_at_caret(&self, cx: &mut Context<Self>) -> Option<Range<usize>> {
+        if self.mode != Mode::Visual || self.formula.is_some() {
+            return None;
+        }
+        let (line, column) = self.document.read(cx).caret(cx);
+        let text = self.document.read(cx).text(cx);
+        let mut line_at = 0;
+        for _ in 0..line {
+            line_at += text[line_at..].find('\n')? + 1;
+        }
+        let rest = &text[line_at..];
+        let end = rest.find('\n').unwrap_or(rest.len());
+        let byte = line_at
+            + rest[..end]
+                .char_indices()
+                .nth(column)
+                .map_or(end, |(at, _)| at);
+        formula_spans(&text)
+            .into_iter()
+            .find(|span| byte == span.start || byte == span.end)
+    }
+
+    /// Writes back the block a press opened and holds the formula for the
+    /// next frame; this is where the page settles before the dialog appears.
+    fn commit_formula(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(span) = self.formula_at_caret(cx) else {
+            return false;
+        };
+        let (line, column) = self.document.read(cx).caret(cx);
+        self.document
+            .update(cx, |document, cx| document.set_caret(line, column, cx));
+        self.formula_pending = Some(span);
+        true
+    }
+
+    /// A press first writes back the block it opened, then shows the editor
+    /// a frame later: the page keeps its new frame while the dialog takes focus.
+    fn press_formula(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.commit_formula(cx) {
+            return false;
+        }
+        let view = cx.entity();
+        window.defer(cx, move |window, cx| {
+            view.update(cx, |view, cx| view.show_formula(window, cx));
+        });
+        true
+    }
+
+    /// Opens the held formula's `$…$` source in a small editor.
+    fn show_formula(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(span) = self.formula_pending.take() else {
+            return;
+        };
+        let text = self.document.read(cx).text(cx);
+        let source = text[span.clone()].to_string();
+        let field = cx.new(|cx| {
+            let mut field = TextInput::new(window, cx);
+            field.set_text(source, cx);
+            field
+        });
+        self.formula = Some((span, field));
+        cx.notify();
+    }
+
+    /// The small source editor: one range edit on Enter, nothing on Escape.
+    fn formula_element(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (span, field) = self.formula.as_ref()?;
+        let (span, field) = (span.clone(), field.clone());
+        let closed = cx.entity();
+        let sent = cx.entity();
+        let prompt = PromptDialog::new(
+            "mark-formula",
+            ely_ui::i18n::text(cx, "menu.formula", &[]),
+            &field,
+            move |_, cx| {
+                closed.update(cx, |view, cx| {
+                    view.formula = None;
+                    cx.notify();
+                })
+            },
+        )
+        .label("$…$")
+        .submit(ely_ui::i18n::text(cx, "doc.formula.apply", &[]))
+        .on_submit(move |source, _, cx| {
+            sent.update(cx, |view, cx| {
+                view.formula = None;
+                view.document.update(cx, |document, cx| {
+                    document.replace(vec![(span.clone(), source.to_string())], cx);
+                });
+                cx.notify();
+            })
+        });
+        Some(prompt.into_any_element())
+    }
+}
+
 impl Render for MarkView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
@@ -365,9 +517,18 @@ impl Render for MarkView {
                 MouseButton::Right,
                 cx.listener(|view, event, _, cx| view.pressed(event, cx)),
             )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|view, _: &MouseUpEvent, window, cx| {
+                    if view.press_formula(window, cx) {
+                        cx.stop_propagation();
+                    }
+                }),
+            )
             .child(self.document.clone())
             .child(zoom)
             .children(self.context_menu(window, cx))
+            .children(self.formula_element(cx))
     }
 }
 
