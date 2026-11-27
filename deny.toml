@@ -94,6 +94,7 @@ ignore = true
 multiple-versions = "deny"
 # Groups at R14.35, all two upstream majors; none may join.
 # ely-files 0.1.1 is the component library's own crate.
+# gpui owns resvg/usvg/tiny-skia 0.46; krilla owns 0.47; neither stack exchanges types.
 skip = [
     "aes",
     "base64",
@@ -144,6 +145,7 @@ skip = [
     "read-fonts",
     "redox_users",
     "r-efi",
+    "resvg",
     "roxmltree",
     "rustc-hash",
     "security-framework",
@@ -157,6 +159,7 @@ skip = [
     "synstructure",
     "thiserror",
     "thiserror-impl",
+    "tiny-skia",
     "tiny-skia-path",
     "toml",
     "toml_datetime",
