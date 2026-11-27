@@ -83,5 +83,5 @@ zip 里带一个空的 `data/`（内含 `README.txt`）是有意的：`apps/gree
 
 - `version` job 在任何构建之前把 tag 顶到 `Cargo.toml` 的 `version`：不等就红，因为推上去的
   tag 改不了。`workflow_dispatch` 只演练，不建 release（`publish` 的 `if` 只认 `refs/tags/v*`）。
-- 正式发布用 `git tag v0.1.17 && git push origin v0.1.17`，tag 只指向 main 上一个 CI 全绿、
+- 正式发布用 `git tag v1.0.0 && git push origin v1.0.0`，tag 只指向 main 上一个 CI 全绿、
   且 dispatch 四格全绿的 commit。
