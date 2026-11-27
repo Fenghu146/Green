@@ -12,7 +12,3 @@
 <!-- 下两行由 scripts/compatibility.py 写出，勿手改 -->
 版本：Green 0.1.17。
 依赖：gpui-pre 0.3.14（patches/gpui 0001–0017，17 个）；组件库 fc71e96（patches/ely-gpui-components 0001–0006，6 个，裁掉 266 个只属于它自己仓库的路径）；crates.io 的另外五个 crate（patches/crates-io 0001，5 个）。
-依赖：gpui-pre 0.3.14（patches/gpui 0001–0017，17 个）；组件库 fc71e96（patches/ely-gpui-components 0001–0005，4 个，裁掉 266 个只属于它自己仓库的路径）；crates.io 的另外五个 crate（patches/crates-io 0001，5 个）。
-=======
-依赖：gpui-pre 0.3.14（patches/gpui 0001–0017，17 个）；组件库 fc71e96（patches/ely-gpui-components 0001–0003，3 个，裁掉 266 个只属于它自己仓库的路径）；crates.io 的另外五个 crate（patches/crates-io 0001，5 个）。
->>>>>>> origin/main
