@@ -222,14 +222,27 @@ jobs:
           for volume in /Volumes/Green "/Volumes/Green "[0-9]*; do
             [ -d "$volume" ] && hdiutil detach "$volume" || true
           done
-          # hdiutil copies the bundle once more before compressing it, and a
-          # release target tree is most of the runner's disk. Deps and build
-          # output go; the directory stays, so the cache step still finds it.
+          # Deps and build output go first; the directory stays, so the cache
+          # step still finds it.
           df -h /
-          rm -rf target/release/deps target/release/build
-          df -h /
-          hdiutil create -volname "Green $VERSION" -srcfolder "$dmgroot" -ov -format UDZO \
-            "$OUT/Green-$VERSION-$ARCH.dmg"
+          rm -rf target/release/deps target/release/build \
+            "target/$TARGET/release/deps" "target/$TARGET/release/build"
+          df -h / "$RUNNER_TEMP" "$OUT"
+          # A fixed-size read/write image (the default format when -size names
+          # one; asking for -format UDRW here is rejected without -srcfolder on
+          # macOS 26+), filled, detached, then compressed.
+          # Creating a compressed image straight from a folder makes hdiutil
+          # stage an uncompressed copy first, and that step has failed here
+          # with "No space left on device" while the volume had 92 GiB free.
+          rw="$RUNNER_TEMP/Green-rw.dmg"
+          rm -f "$rw"
+          mkdir -p "$RUNNER_TEMP/dmgmnt"
+          hdiutil create -size 400m -volname "Green $VERSION" -fs HFS+ "$rw"
+          hdiutil attach "$rw" -nobrowse -mountpoint "$RUNNER_TEMP/dmgmnt"
+          cp -R "$dmgroot/." "$RUNNER_TEMP/dmgmnt/"
+          hdiutil detach "$RUNNER_TEMP/dmgmnt"
+          hdiutil convert "$rw" -format UDZO -o "$OUT/Green-$VERSION-$ARCH.dmg"
+          rm -f "$rw"
       - name: Package (Linux)
         timeout-minutes: 20
         if: matrix.family == 'linux'
