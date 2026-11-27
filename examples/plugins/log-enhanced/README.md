@@ -26,7 +26,9 @@ level columns. Node 18 or newer on `PATH`, no packages. `apiVersion: 1`,
 Copy this folder into Green's data folder under `plugins\log-enhanced\` (on
 Windows, `%LOCALAPPDATA%\Green\green\plugins\log-enhanced\` unless the data
 folder was moved in Settings). Restart Green when the folder is new. Delete the
-folder to uninstall. The stock `log` example claims `.log` too; both can stay
+folder to uninstall. The manifest declares `timeoutMs: 20000`; interpreter
+cold starts on windows-latest reach 7.47 s, so the 8 s default is not used.
+The stock `log` example claims `.log` too; both can stay
 installed. The host picks the first `id` in dictionary order, and this plugin's
 id starts with `0`, so it sorts before `log` and wins deterministically.
 

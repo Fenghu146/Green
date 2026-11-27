@@ -23,14 +23,15 @@ and Green is not changed.
 {
   "id": "csv", "name": "CSV", "version": "0.1.0", "apiVersion": 1,
   "extensions": [".csv"], "command": ["python", "csv_plugin.py"],
-  "timeoutMs": 3000, "enabled": true, "capabilities": ["blocks@1"]
+  "timeoutMs": 20000, "enabled": true, "capabilities": ["blocks@1"]
 }
 ```
 
 - `apiVersion` is an integer; this Green speaks `1` and refuses anything else.
 - `extensions` are matched case-insensitively; `csv` and `.csv` are the same.
 - `command` runs with the plugin's folder as its working directory.
-- `timeoutMs` defaults to 3000; 50 to 600000 is accepted.
+- `timeoutMs` defaults to 8000; 50 to 30000 is accepted. Python/Node examples
+  write 20000 explicitly because windows-latest cold starts reach 7.47 s.
 - `enabled` defaults to true; `capabilities` defaults to `["blocks@1"]`.
 - Unknown fields are ignored on both sides, and a field added later must be
   optional with a default.

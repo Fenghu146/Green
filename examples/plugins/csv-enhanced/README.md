@@ -3,7 +3,7 @@
 Opens `.csv` and `.tsv` as a table plus an italic summary line: row count,
 column count, and the mean of every column whose non-empty values are all
 numbers. Non-numeric columns are skipped. Python 3.8 or newer on `PATH`, no
-packages. `apiVersion: 1`, `timeoutMs: 8000`.
+packages. `apiVersion: 1`, `timeoutMs: 20000`.
 
 ## Edge cases
 

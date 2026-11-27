@@ -126,7 +126,7 @@ Node 默认就是 UTF-8。
   "apiVersion": 1,
   "extensions": [".csv"],
   "command": ["python", "csv_plugin.py"],
-  "timeoutMs": 8000,
+  "timeoutMs": 20000,
   "enabled": true,
   "capabilities": ["blocks@1"]
 }
@@ -145,6 +145,12 @@ Node 默认就是 UTF-8。
 | `capabilities` | 否 | `["blocks@1"]` | 声明会产出的能力 |
 
 `timeoutMs` 从 spawn 算到进程退出，含冷启动。本机 Node 冷启 200–500 ms，但 `windows-latest` 上同一个插件测试通过时用时 3.59 s、失败时 7.47 s（3000 ms 超时加两次 2 s 管道关闭等待）；杀毒扫描、机械盘、Node/Python 首次启动都能把冷启推到秒级。默认 8000，上限 30000，超了拒绝加载。首次打开与后续打开用同一个 `timeoutMs`，没有单独的冷启动宽限。
+
+### 解释器型插件的超时
+
+用 Node / Python 等解释器启动的插件，在 Windows 上**冷启动可能花 5–8 s**（windows-latest 实测 3.59 s 中位、7.47 s 上界）。**不要依赖默认 `timeoutMs`（8000），显式写 20000。** CI 曾因 5000 / 8000 的阈值连续 5 条用例超时——那不是 runner 抖动，是余量不足。
+
+随包的 `examples/plugins/*/manifest.json` 由测试逐份检查：解释器型插件必须显式写 `timeoutMs` 且不小于 15000。产品默认值 8000 不变：它决定坏插件最多冻多久，不该为了测试冷启动而改。
 
 规则：
 

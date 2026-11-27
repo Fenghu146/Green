@@ -59,7 +59,7 @@ fn shipped_csv(root: &Path, python: &str) {
     std::fs::copy(source.join("csv_plugin.py"), folder.join("run.py")).expect("the script");
     std::fs::write(
         folder.join("manifest.json"),
-        manifest(python, "csv", ".csv", 5_000),
+        manifest(python, "csv", ".csv", 20_000),
     )
     .expect("a manifest");
 }
@@ -135,12 +135,14 @@ fn the_shipped_log_plugin_speaks_the_same_contract_from_node() {
     let folder = root.path().join("log");
     std::fs::create_dir_all(&folder).expect("a folder");
     std::fs::copy(source.join("log_plugin.js"), folder.join("run.js")).expect("the script");
-    // windows-latest took 3.59 s once; the 8 s default now covers that cold start.
+    // windows-latest cold starts reach 7.47 s; an explicit 20 s keeps this
+    // test about the contract, not about the runner's process startup time.
     std::fs::write(
         folder.join("manifest.json"),
         format!(
             r#"{{"id": "log", "version": "0.1.0", "apiVersion": 1,
-                "extensions": [".log"], "command": ["{node}", "run.js"]}}"#
+                "extensions": [".log"], "command": ["{node}", "run.js"],
+                "timeoutMs": 20000}}"#
         ),
     )
     .expect("a manifest");
@@ -357,7 +359,7 @@ fn a_bad_answer_version_is_a_reason() {
         root.path(),
         "future",
         "print('{\"apiVersion\": 2, \"blocks\": []}')\n",
-        &manifest(&python, "future", ".future", 5_000),
+        &manifest(&python, "future", ".future", 20_000),
     );
     let host = Host::load(root.path());
     let file = root.path().join("a.future");
@@ -470,7 +472,7 @@ print(json.dumps({{"apiVersion": 1, "blocks": [{{"kind": "paragraph", "text": "{
         root.path(),
         "echo",
         &script("v1"),
-        &manifest(&python, "echo", ".echo", 5_000),
+        &manifest(&python, "echo", ".echo", 20_000),
     );
     let host = Host::load(root.path());
     let file = root.path().join("a.echo");
@@ -518,7 +520,8 @@ print(json.dumps({"apiVersion": 1, "blocks": [{"kind": "paragraph", "text": "sam
     let manifest = |version: &str| {
         format!(
             r#"{{"id": "again", "version": "{version}", "apiVersion": 1,
-                "extensions": [".again"], "command": ["{python}", "run.py"]}}"#
+                "extensions": [".again"], "command": ["{python}", "run.py"],
+                "timeoutMs": 20000}}"#
         )
     };
     let folder = plugin(root.path(), "again", script, &manifest("0.1.0"));

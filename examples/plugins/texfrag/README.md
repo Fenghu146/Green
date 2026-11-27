@@ -20,7 +20,7 @@ packages. Delete the folder to uninstall.
 
 ## Contract
 
-`apiVersion: 1`, `timeoutMs: 8000`. Over 8 MB the host omits `content` and the
+`apiVersion: 1`, `timeoutMs: 20000`. Over 8 MB the host omits `content` and the
 plugin reads `path` itself. Invalid `apiVersion` exits 2 with the reason on
 stderr; an empty file produces one paragraph saying there are no formulas.
 
