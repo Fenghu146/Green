@@ -18,8 +18,10 @@
 
 - **原定**：`docs/design.md` v0.4 §1.5 写「v1 仅 Windows 10/11 x64」，理由是非 Windows 目标一次都没编过，`--capture` 只接 DirectX 读回。
 - **变更**：v1 平台为 Windows / macOS / Linux。依据是 run `45939598799`（分支 `release-trial` 上运行，那个试验工作流已删除）：三平台 `cargo build -p green --release --locked` 均 `BUILD_EXIT=0`（windows 19m19s / macos 4m57s / ubuntu 5m23s）；Linux 另外在 Debian 13 + Xvfb + llvmpipe 下实跑，`ready Green`、退出码 0、中文与公式渲染正常。
-- **已知缺口 1**：macOS 的**运行**证据只到 arm64 虚拟机。方式：打包出来的 `Green.app` 在 macOS 27（arm64）上 `ELY_SMOKE=1` 退出 0、`ready Green`、窗口截图有中文与公式。**x86_64 只编过没跑过**，Intel Mac 真机仍是缺口；发布说明照实写。
-- **已知缺口 2**：`--capture` 只在 Windows 上可用。macOS 与 Linux 都没有 `PlatformWindow::render_to_image` 的实现（macOS 上还会因为提前 `cx.quit()` 让退出码变成 0，只能靠“没写出 PNG”发现）。发行验证因此在这两个平台用真实窗口截图：Linux = Xvfb + `import`，macOS = `screencapture`。要补齐得先 vendor `gpui-pre-wgpu`，在 surface renderer 上补离屏读回。
+- **macOS 运行证据**：arm64 包（macOS 27 arm64 虚拟机上解压出来的 `Green.app`）`ELY_SMOKE=1` 退出 0、日志 `ready Green`、窗口截图里中文与公式正常（run `45945920216` 的 `smoke-macos-aarch64.png`）；同名 x86_64 包在 Rosetta 下同样跑通。**Intel 真机未验证**——机器是 arm64 虚拟机，不是朋友的 Intel Mac；发布说明照实写。
+- **已知债：`--capture` 的帧读回仅 Windows 实现。** macOS / Linux 都落到 gpui 的 trait 默认实现，得到 `render_to_image not implemented`。三平台的产物自证因此分两路：Windows 用 `--capture` 出图，macOS / Linux 用 `ELY_SMOKE=1` 退出 0 + 真实窗口截图（Linux = Xvfb + `import`，macOS = `screencapture`）。
+- **这条债里有半个假绿，下一个人别踩**：macOS 上 `--capture` 失败时因为提前 `cx.quit()`，**进程退出码是 0**，只是没写出 PNG。拿退出码判断会把“渲染坏了”当成通过；要判断只能看 PNG 在不在、是不是空白。Linux 上同样的失败给的是退出码 3。要真正补齐得先 vendor `gpui-pre-wgpu`，在 surface renderer 上补离屏读回。
+- 打包时踩过、且不踩不知道的两条（细节在 `docs/packaging.md`）：字体不能放 `Contents/MacOS`（`codesign` 当嵌套代码，签名直接失败）；`strip` 会丢掉 Mach-O 签名，而 arm64 macOS 不签不启动。
 - 构建缺口只有一个：Linux 的系统库（`libdbus-1-dev` 等，清单在 `packaging/linux/README-portable.txt`）。首次失败的真因是 `keyring` → `libdbus-sys`，不是 gpui。
 - **glibc 下限**：发行包在 `ubuntu-22.04` 上构建（glibc 2.35），不用 `ubuntu-latest`（已是 26.04 / glibc 2.41）。
 - 发行流程：`.github/workflows/release.yml`，tag `v*` 发布、`workflow_dispatch` 只演练不发布；试验用的 `release-trial.yml` 已并入它的 dispatch 模式并删除。
