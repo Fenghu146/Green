@@ -19,6 +19,7 @@
 ## 插件
 
 - 列表项、alert 正文、表格单元格内嵌 Block。v1 的 Block 契约把它们定成字符串；要做就是 `apiVersion += 1`，并按约定保留 v1 两个小版本。
+- 给 manifest 加显式 `priority` 字段，取代现在按 `id` 字典序选扩展名属主的规则。现在不做：要改宿主产品代码（`green-plugins`），而这一轮验证的是"零产品代码加格式"；增强版用 `0` 前缀 id 是权宜之计，已记在 `examples/plugins/README.md`。
 
 ## 打包与便携
 
