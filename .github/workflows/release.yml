@@ -33,6 +33,7 @@ jobs:
       # A pushed tag cannot be corrected, so a mismatch has to stop the run
       # before anything is built, and before anything is published.
       - name: Read Cargo.toml's version, and hold a tag to it
+        timeout-minutes: 5
         id: read
         shell: bash
         run: |
@@ -41,6 +42,13 @@ jobs:
           [ -n "$version" ] || { echo "::error::Cargo.toml has no workspace version"; exit 1; }
           echo "version=$version" >>"$GITHUB_OUTPUT"
           echo "Cargo.toml: \`$version\`" >>"$GITHUB_STEP_SUMMARY"
+          # The changelog is the release's own draft; a version without an
+          # entry is a release nobody wrote down.
+          grep -q "^## $version$" CHANGELOG.md || {
+            echo "::error::CHANGELOG.md has no '## $version' section"
+            exit 1
+          }
+          echo "CHANGELOG.md: \`## $version\` present" >>"$GITHUB_STEP_SUMMARY"
           ref=${GITHUB_REF_NAME}
           case $ref in
             v*)
@@ -68,27 +76,28 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-msvc
             family: windows
-            asset: green-windows-x86_64.zip
-          # Both Apple silicons: an arm-only zip would leave Intel Macs out,
+            arch: x64
+          # Both Apple silicons: an arm-only build would leave Intel Macs out,
           # and a link failure there has to be seen, not skipped.
           - name: macos-aarch64
             os: macos-latest
             target: aarch64-apple-darwin
             family: macos
-            asset: green-macos-aarch64.zip
+            arch: arm64
           - name: macos-x86_64
             os: macos-latest
             target: x86_64-apple-darwin
             family: macos
-            asset: green-macos-x86_64.zip
+            arch: x64
           - name: linux-x86_64
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             family: linux
-            asset: green-linux-x86_64.tar.gz
+            arch: x64
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TARGET: ${{ matrix.target }}
+      ARCH: ${{ matrix.arch }}
       OUT: ${{ github.workspace }}/out
     steps:
       - uses: actions/checkout@v4
@@ -97,9 +106,11 @@ jobs:
           key: release-${{ matrix.target }}
           cache-on-failure: true
       - name: Install the target
+        timeout-minutes: 5
         shell: bash
         run: rustup target add "$TARGET"
       - name: Linux build dependencies
+        timeout-minutes: 15
         if: matrix.family == 'linux'
         shell: bash
         run: |
@@ -113,35 +124,59 @@ jobs:
             libfontconfig1-dev libdbus-1-dev \
             libgl1-mesa-dev libegl1-mesa-dev \
             xvfb imagemagick
-      # `capture` is a shipped feature, not a test one: the archive below is
-      # what this job unpacks and runs, so what it proves is what ships. It
-      # needs gpui's test-support, which is why the binary carries it.
-      - name: Build
-        shell: bash
-        run: cargo build -p green --release --locked --features capture --target "$TARGET"
-      - name: Package (Windows)
+      # The runner image carries NSIS in some versions and not others.
+      - name: NSIS
+        timeout-minutes: 15
         if: matrix.family == 'windows'
         shell: bash
         run: |
           set -euo pipefail
-          dist=green-windows-x86_64
-          stage="$RUNNER_TEMP/$dist"
+          if ! command -v makensis >/dev/null 2>&1; then
+            choco install nsis -y --no-progress
+            echo "C:/Program Files (x86)/NSIS" >>"$GITHUB_PATH"
+            export PATH="$PATH:/c/Program Files (x86)/NSIS"
+          fi
+          makensis -VERSION
+      # `capture` is a shipped feature, not a test one: the installer below
+      # runs the binary this step built, so what it proves is what ships. It
+      # needs gpui's test-support, which is why the binary carries it.
+      - name: Build
+        timeout-minutes: 90
+        shell: bash
+        run: cargo build -p green --release --locked --features capture --target "$TARGET"
+      - name: Package (Windows)
+        timeout-minutes: 20
+        if: matrix.family == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/green-windows"
           rm -rf "$stage" "$OUT"
-          mkdir -p "$stage/fonts" "$stage/data" "$stage/LICENSES" "$OUT"
+          mkdir -p "$stage/fonts" "$stage/LICENSES" "$stage/data" "$OUT"
           cp "target/$TARGET/release/green.exe" "$stage/"
           cp assets/fonts/*.otf assets/fonts/*.ttf assets/fonts/OFL-*.txt "$stage/fonts/"
-          # An empty `data` beside the exe is what makes this copy portable.
           cp packaging/windows/data-readme.txt "$stage/data/README.txt"
           cp packaging/windows/README-portable.txt "$stage/README.txt"
           cp LICENSE THIRD-PARTY-NOTICES.txt "$stage/"
           cp LICENSES/*.txt "$stage/LICENSES/"
+          # The portable choice: `data/` beside the exe makes this copy its own.
           cd "$RUNNER_TEMP"
           if command -v 7z >/dev/null 2>&1; then
-            7z a -tzip "$OUT/$dist.zip" "$dist" >/dev/null
+            7z a -tzip "$OUT/Green-$VERSION-windows-x64-portable.zip" green-windows >/dev/null
           else
-            tar -a -c -f "$OUT/$dist.zip" "$dist"
+            tar -a -c -f "$OUT/Green-$VERSION-windows-x64-portable.zip" green-windows
           fi
+          # The installed copy is not portable: no data/ folder, no README.
+          rm -rf "$stage/data" "$stage/README.txt"
+          cp packaging/windows/green.nsi "$stage/"
+          
+          
+          sed -i "s|@VERSION@|$VERSION|; s|@OUTFILE@|Green-$VERSION-x64-setup.exe|" "$stage/green.nsi"
+          cd "$stage"
+          makensis green.nsi
+          mv "Green-$VERSION-x64-setup.exe" "$OUT/"
       - name: Package (macOS)
+        timeout-minutes: 20
         if: matrix.family == 'macos'
         shell: bash
         run: |
@@ -172,13 +207,29 @@ jobs:
           # Last, once Contents/ is complete, so the bundle's own seal covers it.
           codesign --force --sign - "$app"
           codesign --verify --verbose "$app"
-          ditto -c -k --sequesterRsrc --keepParent "$app" "$OUT/${{ matrix.asset }}"
+          # The portable choice: the app on its own, zipped.
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$OUT/Green-$VERSION-macos-$ARCH.zip"
+          # The usual one: a disk image that opens onto Applications.
+          dmgroot="$RUNNER_TEMP/dmgroot"
+          rm -rf "$dmgroot"
+          mkdir -p "$dmgroot"
+          cp -R "$app" "$dmgroot/Green.app"
+          ln -s /Applications "$dmgroot/Applications"
+          # UDZO compresses; -srcfolder keeps the /Applications symlink. A
+          # volume of ours left mounted by an earlier run makes create fail
+          # with "Resource busy", so those go first — by name, never -force.
+          for volume in /Volumes/Green "/Volumes/Green "[0-9]*; do
+            [ -d "$volume" ] && hdiutil detach "$volume" || true
+          done
+          hdiutil create -volname "Green $VERSION" -srcfolder "$dmgroot" -ov -format UDZO \
+            "$OUT/Green-$VERSION-$ARCH.dmg"
       - name: Package (Linux)
+        timeout-minutes: 20
         if: matrix.family == 'linux'
         shell: bash
         run: |
           set -euo pipefail
-          dist=green-linux-x86_64
+          dist="Green-$VERSION-linux-x64"
           stage="$RUNNER_TEMP/$dist"
           rm -rf "$stage" "$OUT"
           mkdir -p "$stage/fonts" "$stage/LICENSES" "$OUT"
@@ -192,36 +243,61 @@ jobs:
           cp LICENSES/*.txt "$stage/LICENSES/"
           cd "$RUNNER_TEMP"
           tar -czf "$OUT/$dist.tar.gz" "$dist"
-      # Whatever ships is what gets run: unpack the archive into a clean folder
-      # and start the binary from there, so a missing font or library next to
-      # the executable fails here rather than on a friend's machine.
+      # Whatever ships is what gets installed: the installer runs, the installed
+      # copy starts, and the uninstaller has to leave nothing behind.
       - name: Smoke (Windows)
+        timeout-minutes: 20
         if: matrix.family == 'windows'
         shell: bash
         run: |
           set -euo pipefail
-          unpack="$RUNNER_TEMP/unpacked"
-          rm -rf "$unpack"
-          mkdir -p "$unpack"
-          unzip -q "$OUT/green-windows-x86_64.zip" -d "$unpack"
-          cd "$unpack/green-windows-x86_64"
-          ./green.exe --capture "$OUT/smoke-${{ matrix.name }}.png" --theme light --wait-ms 4000 "$GITHUB_WORKSPACE/$SMOKE_DOC"
+          installer="$OUT/Green-$VERSION-x64-setup.exe"
+          # Per-user and silent: no UAC, no prompt, no desktop.
+          "$installer" /S
+          installed="$LOCALAPPDATA/Programs/Green"
+          for _ in $(seq 30); do
+            [ -f "$installed/green.exe" ] && break
+            sleep 1
+          done
+          [ -f "$installed/green.exe" ] || { echo "::error::the installer left no green.exe in $installed"; exit 1; }
+          "$installed/green.exe" --capture "$OUT/smoke-${{ matrix.name }}.png" --theme light --wait-ms 4000 "$GITHUB_WORKSPACE/$SMOKE_DOC"
           ls -l "$OUT/smoke-${{ matrix.name }}.png"
+          # 1.0.0 associates nothing: HKCU\Software\Classes stays untouched.
+          powershell -NoProfile -Command "if (Test-Path 'HKCU:\Software\Classes\Green.Markdown') { Write-Error 'wrote a file association'; exit 1 }"
+          # And the uninstaller takes back everything it did write.
+          "$installed/Uninstall.exe" /S
+          for _ in $(seq 30); do
+            [ -d "$installed" ] || break
+            sleep 1
+          done
+          [ ! -d "$installed" ] || { echo "::error::the uninstaller left $installed"; exit 1; }
+          powershell -NoProfile -Command "
+            foreach (\$key in 'HKCU:\Software\Classes\Green.Markdown','HKCU:\Software\Green','HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Green') {
+              if (Test-Path \$key) { Write-Error \"left \$key\"; exit 1 }
+            }
+            if (Test-Path 'HKCU:\Software\Classes\Green.Markdown') { Write-Error 'left a file association'; exit 1 }"
+      # The dmg is mounted, the app copied out of it the way a person drags it,
+      # and only then started.
       - name: Smoke (macOS)
+        timeout-minutes: 20
         if: matrix.family == 'macos'
         shell: bash
         run: |
           set -euo pipefail
-          unpack="$RUNNER_TEMP/unpacked"
-          rm -rf "$unpack"
-          mkdir -p "$unpack"
-          ditto -x -k "$OUT/${{ matrix.asset }}" "$unpack"
-          # The seal has to survive the zip, not only the staging folder.
-          codesign --verify --verbose "$unpack/Green.app"
-          app="$unpack/Green.app/Contents/MacOS/green"
+          mount="$RUNNER_TEMP/mnt"
+          installed="$RUNNER_TEMP/Applications"
+          rm -rf "$mount" "$installed"
+          mkdir -p "$mount" "$installed"
+          hdiutil attach "$OUT/Green-$VERSION-$ARCH.dmg" -nobrowse -readonly -mountpoint "$mount"
+          # The seal has to survive the disk image, not only the staging folder.
+          codesign --verify --verbose "$mount/Green.app"
+          cp -R "$mount/Green.app" "$installed/"
+          hdiutil detach "$mount"
+          [ -x "$installed/Green.app/Contents/MacOS/green" ] || { echo "::error::no executable came out of the dmg"; exit 1; }
+          app="$installed/Green.app/Contents/MacOS/green"
           # `--capture` reads a frame back only on Windows (DirectX); macOS
           # and Linux bail with "render_to_image not implemented". So the
-          # proof here is the unpacked binary reaching its first frame, plus a
+          # proof here is the installed app reaching its first frame, plus a
           # picture of the window for a human to look at.
           ELY_SMOKE=1 "$app" "$GITHUB_WORKSPACE/$SMOKE_DOC" 2>&1 | tee "$RUNNER_TEMP/smoke.log"
           grep -q 'ready Green' "$RUNNER_TEMP/smoke.log"
@@ -234,6 +310,7 @@ jobs:
           wait "$pid" 2>/dev/null || true
           ls -l "$OUT/smoke-${{ matrix.name }}.png"
       - name: Smoke (Linux)
+        timeout-minutes: 20
         if: matrix.family == 'linux'
         shell: bash
         run: |
@@ -241,8 +318,8 @@ jobs:
           unpack="$RUNNER_TEMP/unpacked"
           rm -rf "$unpack"
           mkdir -p "$unpack"
-          tar -xzf "$OUT/green-linux-x86_64.tar.gz" -C "$unpack"
-          cd "$unpack/green-linux-x86_64"
+          tar -xzf "$OUT/Green-$VERSION-linux-x64.tar.gz" -C "$unpack"
+          cd "$unpack/Green-$VERSION-linux-x64"
           # `--capture` has no frame readback here either, so the proof is the
           # unpacked binary drawing a real window under X11.
           ELY_SMOKE=1 xvfb-run -a -s "-screen 0 1400x900x24" ./green "$GITHUB_WORKSPACE/$SMOKE_DOC"
@@ -253,11 +330,12 @@ jobs:
           echo "linux smoke: $colours colours in the frame" >>"$GITHUB_STEP_SUMMARY"
           ls -l "$OUT/smoke-${{ matrix.name }}.png"
       - name: Checksums
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
           cd "$OUT"
-          files=$(ls green-*.zip green-*.tar.gz 2>/dev/null || true)
+          files=$(ls Green-*.exe Green-*.dmg Green-*.zip Green-*.tar.gz 2>/dev/null || true)
           [ -n "$files" ] || { echo "::error::no package was written to $OUT"; exit 1; }
           sha256sum $files | tee "SHA256SUMS-${{ matrix.name }}.txt"
           cat "SHA256SUMS-${{ matrix.name }}.txt" >>"$GITHUB_STEP_SUMMARY"
@@ -265,8 +343,10 @@ jobs:
         with:
           name: package-${{ matrix.name }}
           path: |
-            out/green-*.zip
-            out/green-*.tar.gz
+            out/Green-*.exe
+            out/Green-*.dmg
+            out/Green-*.zip
+            out/Green-*.tar.gz
             out/SHA256SUMS-*.txt
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
@@ -280,72 +360,128 @@ jobs:
     needs: [version, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
       # The licence text is a release asset of its own: GPL-3.0 asks the
       # distributor to hand it over with the binaries.
       - uses: actions/checkout@v4
+        timeout-minutes: 5
       - uses: actions/download-artifact@v4
+        timeout-minutes: 10
         with:
           path: dist
           merge-multiple: true
-      - name: One checksum file for every asset
+      # `needs: build` already covers all four entries of the matrix, but a
+      # green run with one asset missing is exactly how a release ships half
+      # of itself, so the list is asserted before anything is created.
+      - name: Every asset is here, or nothing is published
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          missing=0
+          for name in \
+            "Green-$version-x64-setup.exe" \
+            "Green-$version-windows-x64-portable.zip" \
+            "Green-$version-arm64.dmg" \
+            "Green-$version-macos-arm64.zip" \
+            "Green-$version-x64.dmg" \
+            "Green-$version-macos-x64.zip" \
+            "Green-$version-linux-x64.tar.gz" \
+            smoke-windows-x86_64.png smoke-macos-aarch64.png \
+            smoke-macos-x86_64.png smoke-linux-x86_64.png; do
+            if [ -f "dist/$name" ]; then
+              echo "have $name"
+            else
+              echo "::error::missing dist/$name"
+              missing=1
+            fi
+          done
+          for name in LICENSE THIRD-PARTY-NOTICES.txt; do
+            [ -f "$name" ] || { echo "::error::missing $name"; missing=1; }
+          done
+          [ "$missing" = 0 ] || {
+            echo "::error::an asset is missing, so this release is not built; nothing is published"
+            exit 1
+          }
+      - name: Checksums, sizes, and the hash table the notes inline
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
           cd dist
-          ls -l
-          sha256sum green-*.zip green-*.tar.gz | sort -k2 >SHA256SUMS.txt
+          sha256sum Green-* | sort -k2 >SHA256SUMS.txt
           cat SHA256SUMS.txt
-          # Everything the release carries, named once, for the log.
-          ls -1 ../LICENSE green-*.zip green-*.tar.gz SHA256SUMS*.txt smoke-*.png >>"$GITHUB_STEP_SUMMARY"
+          {
+            echo "| 文件 | 字节 | SHA-256 |"
+            echo "| --- | --- | --- |"
+            while read -r hash name; do
+              printf '| `%s` | %s | `%s` |\n' "$name" "$(stat -c%s "$name")" "$hash"
+            done <SHA256SUMS.txt
+          } >hashes.md
+          # The size of every asset, as this version's baseline for the next.
+          echo "| 文件 | 字节 |" >>"$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >>"$GITHUB_STEP_SUMMARY"
+          for file in Green-*; do
+            printf '| `%s` | %s |\n' "$file" "$(stat -c%s "$file")" >>"$GITHUB_STEP_SUMMARY"
+          done
       - name: Release notes
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
           cat >notes.md <<'NOTES'
-          Green 是一个离线 Markdown 笔记应用：内容只存在磁盘上的 `.md` 文件里，没有数据库、没有自有格式。
+          **未签名，系统会拦一次。** Windows 首次双击安装程序看到「Windows 已保护你的电脑」：点 **更多信息** → **仍要运行**（通常要点两次）；如果连「更多信息」都没有，右键安装程序 → **属性** → 勾 **解除锁定** → 确定，再双击。macOS 提示「无法验证开发者」：右键 `Green.app` → **打开** → 再点 **打开**，或 `xattr -d com.apple.quarantine /Applications/Green.app`。
 
-          ## 下载
+          这不是病毒，也不是文件坏了：两个平台都要求付费的代码签名证书，个人项目不买。
 
-          | 平台 | 文件 | 说明 |
+          Green 1.0.0 是一个自用的离线 Markdown 笔记编辑器：内容只存在磁盘上的 `.md` 文件里——没有数据库、没有自有格式、没有 sidecar。GPL-3.0-or-later，源码就是本仓库的 tag `v1.0.0`。
+
+          ## 下载与安装
+
+          | 平台 | 安装包 | 便携版 |
           | --- | --- | --- |
-          | Windows 10/11 x64 | `green-windows-x86_64.zip` | 解压即用，双击 `green.exe` |
-          | macOS（Apple 芯片） | `green-macos-aarch64.zip` | 解压得到 `Green.app` |
-          | macOS（Intel） | `green-macos-x86_64.zip` | 同上 |
-          | Linux x64 | `green-linux-x86_64.tar.gz` | glibc 2.35+，见包内 `README.txt` |
+          | Windows 10/11 x64 | `Green-1.0.0-x64-setup.exe` | `Green-1.0.0-windows-x64-portable.zip` |
+          | macOS（Apple 芯片） | `Green-1.0.0-arm64.dmg` | `Green-1.0.0-macos-arm64.zip` |
+          | macOS（Intel） | `Green-1.0.0-x64.dmg` | `Green-1.0.0-macos-x64.zip` |
+          | Linux x64 | 无 | `Green-1.0.0-linux-x64.tar.gz` |
 
-          每个包都带 `fonts/`、`LICENSE`、`THIRD-PARTY-NOTICES.txt` 与 `LICENSES/`；本页另附
-          `LICENSE`（GPL-3.0 全文）与 `SHA256SUMS.txt`。每个二进制都是从一个解压出来的包里启动并
-          渲染过一份真实文档之后才发布，对应的截图是同名 `smoke-*.png`。
+          **安装包**：Windows 双击装完即有开始菜单项与卸载入口，装到 `%LOCALAPPDATA%\Programs\Green`，**不需要管理员权限**，**不写注册表里的文件关联**（没有 `.md` 关联，也没有关联残留）；macOS 打开 dmg，把 `Green.app` 拖进「应用程序」。
 
-          ## 没有签名：系统会拦一次
+          **便携版**：解压直接运行，不需要安装。Windows 那份的设置与会话留在同目录的 `data\`，删掉就回到 `%LOCALAPPDATA%\Green\green`。
 
-          **Windows**：第一次运行 `green.exe` 会弹 SmartScreen，点“更多信息 → 仍要运行”。不写注册表，
-          不需要安装器；`data\` 文件夹让这一份成为便携副本（设置、会话、日志都在 `data\green\` 下）。
+          Linux 需要 glibc 2.35+（Ubuntu 22.04 / Debian 12 及更新），系统库清单与 `.desktop` 见包内 `README.txt`。
 
-          **macOS**：这个包**没有 Apple 开发者签名**（99 美元一年，个人项目不买），只有本机 ad-hoc 签名。
-          Gatekeeper 会拦住第一次打开，两种做法任选：
+          每个安装包都是**装完之后**从安装位置启动、渲染过一份真实文档才发布（`smoke-*.png` 就是那一次的截图，里面有中文与公式）。
 
-          - 右键（或按住 Control）点 `Green.app` → **打开** → 再点“打开”；
-          - 或者打开终端，清掉隔离属性后再双击：
+          ## 已知限制
 
-            ```sh
-            xattr -d com.apple.quarantine Green.app
-            ```
+          - `green --capture` 的帧读回仅 Windows 实现；macOS / Linux 返回 `render_to_image not implemented`，发行验证改用真实窗口截图。
+          - macOS Intel 包只验证了构建，没在 Intel 真机上跑过（arm64 包在 macOS 27 上实跑通过）。
+          - 插件按 `id` 字典序决定同名扩展的归属，清单里没有显式优先级字段。
+          - `\begin{aligned}` 等 LaTeX 环境不在转换器覆盖内（只认 `cases`），导出时那一条公式降级为源码。
+          - 未签名、无自动更新、无安装器之外的集成（不做文件关联）。
 
-          提示“已损坏”也是同一件事，同样处理。macOS 版数据在 `~/Library/Application Support/Green/green/`。
+          ## 每个资产的 SHA-256
 
-          ## 已知缺口
+          核对方式：`sha256sum Green-1.0.0-x64-setup.exe` 与下表比对。签名不可得，哈希是唯一能替代它的东西。
 
-          - **macOS arm64 在虚拟机上实跑通过；macOS x86_64 只验证了构建**，没有在 Intel 真机上跑过。
-          - `--capture`（离屏截图）只在 Windows 上可用；macOS 与 Linux 的发行验证改用真实窗口截图。
-          - 没有代码签名（macOS 只是 ad-hoc 签名，所以 Gatekeeper 仍会拦），没有自动更新，没有安装器。
           NOTES
-          echo "notes written" >>"$GITHUB_STEP_SUMMARY"
+          cat dist/hashes.md >>notes.md
+          cat >>notes.md <<'NOTES'
+
+          ## 许可
+
+          GPL-3.0-or-later：全文见本页附件 `LICENSE`，每个包里也有一份；第三方依赖与许可见 `THIRD-PARTY-NOTICES.txt`；随包字体是 SIL OFL 1.1（`LICENSES/OFL-1.1.txt`）。**对应源码即本仓库 tag `v1.0.0`。**
+
+          也附了 `SHA256SUMS.txt`（同样的哈希，机器可读）与 `THIRD-PARTY-NOTICES.txt`。
+          NOTES
+          echo "notes: $(wc -l <notes.md) lines" >>"$GITHUB_STEP_SUMMARY"
       - name: Create the release
+        timeout-minutes: 15
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -355,4 +491,5 @@ jobs:
             --title "Green ${{ needs.version.outputs.version }}" \
             --notes-file notes.md \
             LICENSE THIRD-PARTY-NOTICES.txt \
-            dist/green-*.zip dist/green-*.tar.gz dist/SHA256SUMS*.txt dist/smoke-*.png
+            dist/Green-*.exe dist/Green-*.dmg dist/Green-*.zip dist/Green-*.tar.gz \
+            dist/SHA256SUMS.txt dist/smoke-*.png
