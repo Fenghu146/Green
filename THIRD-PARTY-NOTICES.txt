@@ -2368,20 +2368,20 @@ insights.
 ================================================================================
 GNU General Public License v3.0 or later (GPL-3.0-or-later)
 Used by:
-  - green 0.1.17
-  - ely-files 0.1.17
-  - ely-ipc 0.1.17
-  - ely-login 0.1.17
-  - ely-lok 0.1.17
-  - ely-mail-engine 0.1.17
-  - ely-mail-fake 0.1.17
-  - ely-office 0.1.17
-  - ely-platform 0.1.17
-  - ely-start 0.1.17
-  - ely-ui 0.1.17
-  - green-export 0.1.17
-  - green-math 0.1.17
-  - green-plugins 0.1.17
+  - green 1.0.0
+  - ely-files 1.0.0
+  - ely-ipc 1.0.0
+  - ely-login 1.0.0
+  - ely-lok 1.0.0
+  - ely-mail-engine 1.0.0
+  - ely-mail-fake 1.0.0
+  - ely-office 1.0.0
+  - ely-platform 1.0.0
+  - ely-start 1.0.0
+  - ely-ui 1.0.0
+  - green-export 1.0.0
+  - green-math 1.0.0
+  - green-plugins 1.0.0
 --------------------------------------------------------------------------------
 GNU GENERAL PUBLIC LICENSE
 Version 3, 29 June 2007
