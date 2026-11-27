@@ -168,7 +168,8 @@ jobs:
           fi
           # The installed copy is not portable: no data/ folder, no README.
           rm -rf "$stage/data" "$stage/README.txt"
-          cp packaging/windows/green.nsi "$stage/"
+          # Absolute: the zip above left the shell in $RUNNER_TEMP.
+          cp "$GITHUB_WORKSPACE/packaging/windows/green.nsi" "$stage/"
           
           
           sed -i "s|@VERSION@|$VERSION|; s|@OUTFILE@|Green-$VERSION-x64-setup.exe|" "$stage/green.nsi"
