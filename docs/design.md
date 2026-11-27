@@ -110,13 +110,13 @@ S2 的证据（缺一项即未完成）：5 万字 K2P p50/p95/p99、>16 ms 占�
 
 ### 1.5 平台（范围变更：三平台）
 
-v1 平台：Windows / macOS / Linux。**依据**：run 45939598799 三平台 `cargo build -p green --release --locked` 均 `BUILD_EXIT=0`；Linux 在 Xvfb + llvmpipe 下实跑 `ready Green`、中文与公式渲染正常；**macOS 仅验证构建，未验证运行**。
+v1 平台：Windows / macOS / Linux。**依据**：run 45939598799 三平台 `cargo build -p green --release --locked` 均 `BUILD_EXIT=0`；Linux 在 Xvfb + llvmpipe 下实跑 `ready Green`、中文与公式渲染正常；macOS（arm64）在 macOS 27 虚拟机上用打包出来的 `Green.app` 实跑，`ready Green`、截图里中文与公式正常。**macOS Intel（x86_64）只验证了构建，未验证运行**。
 
 这是范围变更，不是原计划。2026-11-26 的 v0.4 写的是「v1 仅 Windows 10/11 x64」，依据是当时非 Windows 目标一次都没编过（开发机只有 `x86_64-pc-windows-msvc` 的 std，`cargo check --target x86_64-unknown-linux-gnu` 停在 `can't find crate for core`，`--capture` 也只接 DirectX 的离屏读回），于是把 Linux / macOS 排进 `later.md`。2026-11-27 的三平台实验把这条前提推翻了：基座本来就有分平台实现（`media/gst.rs`、`print/linux.rs` + `print/mac.rs`、`trust/linux.rs`、macOS 的 Metal 探测），`vendor/` 里有 `gpui-pre-linux` 与 `gpui-pre-macos`，补丁序列里也有 `0006-linux-*`、`0007-macos-*`，`packaging/windows/icon.rs` 按 `CARGO_CFG_TARGET_OS` 跳过资源，字体找 `<exe>/fonts` 再退源码树。唯一的构建缺口是 Linux 的系统库（见 `packaging/linux/README-portable.txt`）。
 
-**macOS 只验证了构建。** 没有真机跑过，所以「支持 macOS」这句话现在只到「能编」这一步；运行验证仍是已知缺口，记在 `STATUS.md`。
+**macOS 的运行证据只到 arm64 虚拟机。** arm64 包在 macOS 27 虚拟机上实跑通过（`ELY_SMOKE=1` 退出 0、窗口截图里有中文与公式，见 `.amp/in/artifacts/macshot.png` 那一轮的记录）；**x86_64 包只编过，没跑过**，真机（朋友的 Intel Mac）仍是缺口。
 
-`--capture` 的能力也分平台：Windows（DirectX 读回）与 macOS 有 `PlatformWindow::render_to_image`，Linux 后端没有，调用得到 `render_to_image not implemented for this platform`、退出码 3。发行验证因此在 Linux 上改用 Xvfb 下的真实窗口截图。
+`--capture` 只在 Windows 上可用：`PlatformWindow::render_to_image` 有 DirectX 读回，macOS 与 Linux 都走 trait 的默认实现，得到 `render_to_image not implemented for this platform`（macOS 上还因为 `cx.quit()` 提前退出，进程码是 0，只能靠“没写出 PNG”发现）。发行验证因此在这两个平台上改用真实窗口：Linux 是 Xvfb + `import`，macOS 是 `screencapture`。
 
 ## 2. 许可
 
