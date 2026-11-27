@@ -4,7 +4,7 @@
 
 ## 产品
 
-一个离线的 Markdown 笔记应用，Windows 优先，单进程 `green.exe`。内容只存在于磁盘文件里：无数据库、无自有格式、无 sidecar。折叠与大纲只是视图状态，永不写入文件。界面按 `design.md` §8 的骨架，深浅两套主题。
+一个离线的 Markdown 笔记应用，单进程 `green`/`green.exe`，目标平台 Windows / macOS / Linux（**macOS 只验证了构建，未验证运行**，见 `docs/design.md` §1.5）。内容只存在于磁盘文件里：无数据库、无自有格式、无 sidecar。折叠与大纲只是视图状态，永不写入文件。界面按 `design.md` §8 的骨架，深浅两套主题。
 
 ## 结构
 

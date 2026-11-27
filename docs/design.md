@@ -108,11 +108,15 @@ S2 的证据（缺一项即未完成）：5 万字 K2P p50/p95/p99、>16 ms 占�
 
 2026-11-27 实测：两个 release exe 从同一提交分别构建到独立 `CARGO_TARGET_DIR`，74,099,712 → 77,575,680 B。早期记的 40.6 MB 是更早阶段的基座，不与本次增量混算；`typst`/`typst-svg` 已随 S2b 在基线里，这里新增的只是 `typst-pdf`/krilla 一条链。
 
-### 1.5 平台（v1 仅 Windows）
+### 1.5 平台（范围变更：三平台）
 
-v1 的目标平台只有 Windows 10/11 x64（用户定案，2026-11-26）。**非 Windows 目标的编译未验证**：开发机只装了 `x86_64-pc-windows-msvc` 的 std，`cargo check --target x86_64-unknown-linux-gnu` 停在 `can't find crate for core`，而 gpui 的 Linux 依赖（x11 / wayland / xkbcommon）在 Windows 上也装不起来；`--capture` 更是只接 DirectX 的离屏读回。所以 Linux / macOS 既没编过也没跑过，排进 `later.md`，不在 v1 范围。将来要做时先改这一节与 §1 的范围，再谈代码。
+v1 平台：Windows / macOS / Linux。**依据**：run 45939598799 三平台 `cargo build -p green --release --locked` 均 `BUILD_EXIT=0`；Linux 在 Xvfb + llvmpipe 下实跑 `ready Green`、中文与公式渲染正常；**macOS 仅验证构建，未验证运行**。
 
-已经能确认的只有一点：`ely-ui` 的 `capture` 特性里的 `gpui_windows/test-support` 在 Cargo 的 feature 解析阶段对其他目标不报错（它只在该目标有依赖时生效），`capture.rs` 内部没有任何 `#[cfg(windows)]` 分支。
+这是范围变更，不是原计划。2026-11-26 的 v0.4 写的是「v1 仅 Windows 10/11 x64」，依据是当时非 Windows 目标一次都没编过（开发机只有 `x86_64-pc-windows-msvc` 的 std，`cargo check --target x86_64-unknown-linux-gnu` 停在 `can't find crate for core`，`--capture` 也只接 DirectX 的离屏读回），于是把 Linux / macOS 排进 `later.md`。2026-11-27 的三平台实验把这条前提推翻了：基座本来就有分平台实现（`media/gst.rs`、`print/linux.rs` + `print/mac.rs`、`trust/linux.rs`、macOS 的 Metal 探测），`vendor/` 里有 `gpui-pre-linux` 与 `gpui-pre-macos`，补丁序列里也有 `0006-linux-*`、`0007-macos-*`，`packaging/windows/icon.rs` 按 `CARGO_CFG_TARGET_OS` 跳过资源，字体找 `<exe>/fonts` 再退源码树。唯一的构建缺口是 Linux 的系统库（见 `packaging/linux/README-portable.txt`）。
+
+**macOS 只验证了构建。** 没有真机跑过，所以「支持 macOS」这句话现在只到「能编」这一步；运行验证仍是已知缺口，记在 `STATUS.md`。
+
+`--capture` 的能力也分平台：Windows（DirectX 读回）与 macOS 有 `PlatformWindow::render_to_image`，Linux 后端没有，调用得到 `render_to_image not implemented for this platform`、退出码 3。发行验证因此在 Linux 上改用 Xvfb 下的真实窗口截图。
 
 ## 2. 许可
 

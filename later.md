@@ -27,5 +27,5 @@
 
 ## 平台
 
-- Linux / macOS 目标。v1 只做 Windows（`docs/design.md` §1.5），非 Windows 的编译与运行都没验过；`--capture` 只接 DirectX 的离屏读回。要做先改 §1.5 的范围。
+- ~~Linux / macOS 目标~~：2026-11-27 已扩进 v1（`docs/design.md` §1.5，run 45939598799）。剩下的两条缺口记在这里：**macOS 运行验证**（只验过构建），以及 **Linux 的 `--capture` 帧读回**（gpui 的 Linux 后端没有，要做得先 vendor `gpui-pre-wgpu` 并在 surface renderer 上补离屏读回）。
 - `ely-platform/src/diagnostics.rs:47` 仍把 `AppId::Pdf` 映射到 `"ely-pdf-worker"`，而 `ely-pdf-engine` / `ely-pdf-worker` 都已移出 workspace。它现在只是日志里的一个字符串，不影响行为；删 Pdf app 时一并去掉。

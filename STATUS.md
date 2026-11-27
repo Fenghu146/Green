@@ -14,6 +14,16 @@
 - `crates/ely-ui/src/{fonts,theme,opening,lib}.rs` 与 `vendor/ely-gpui-components/**` 共写：ely-ui 的字体与主题由导出线先落，S2a 的视图改动后合；vendor 一律经 `patches/` 改。
 - 主线最后合；动 `Cargo.lock` 的人负责 `cargo deny` 与 notices 同步；合并验收 = `git diff origin/main` 为空 + `cargo test --workspace --no-fail-fast` 全绿。
 
+## 范围变更：v1 从「仅 Windows」扩到三平台（2026-11-27）
+
+- **原定**：`docs/design.md` v0.4 §1.5 写「v1 仅 Windows 10/11 x64」，理由是非 Windows 目标一次都没编过，`--capture` 只接 DirectX 读回。
+- **变更**：v1 平台为 Windows / macOS / Linux。依据是 run `45939598799`（分支 `release-trial` 上运行，那个试验工作流已删除）：三平台 `cargo build -p green --release --locked` 均 `BUILD_EXIT=0`（windows 19m19s / macos 4m57s / ubuntu 5m23s）；Linux 另外在 Debian 13 + Xvfb + llvmpipe 下实跑，`ready Green`、退出码 0、中文与公式渲染正常。
+- **已知缺口 1（阻塞「支持 macOS」这句话）**：**macOS 仅验证构建，未验证运行**。没有真机跑过；发布说明必须照实写。
+- **已知缺口 2**：Linux 没有 `PlatformWindow::render_to_image`，`--capture` 在 Linux 上得 `render_to_image not implemented for this platform`、退出码 3。发行验证因此在 Linux 上用 Xvfb 下的真实窗口截图代替；要补齐得先 vendor `gpui-pre-wgpu`。
+- 构建缺口只有一个：Linux 的系统库（`libdbus-1-dev` 等，清单在 `packaging/linux/README-portable.txt`）。首次失败的真因是 `keyring` → `libdbus-sys`，不是 gpui。
+- **glibc 下限**：发行包在 `ubuntu-22.04` 上构建（glibc 2.35），不用 `ubuntu-latest`（已是 26.04 / glibc 2.41）。
+- 发行流程：`.github/workflows/release.yml`，tag `v*` 发布、`workflow_dispatch` 只演练不发布；试验用的 `release-trial.yml` 已并入它的 dispatch 模式并删除。
+
 ## 工作规矩
 
 - **合并即删 worktree，不做归档。** 分支进 main 后立刻 `git worktree remove`（不加 `--force`）；它报不干净就停下查清，别强删。删的是工作区，分支本身留在远端。
